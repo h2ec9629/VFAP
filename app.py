@@ -1073,7 +1073,10 @@ def detect_base_dir() -> Path:
             continue
 
     # どれも見つからなければ、スクリプトの場所（or カレント）を返す
-    return candidates[0] if candidates else Path.cwd()
+    try:
+        return Path(__file__).resolve().parent
+    except Exception:
+        return Path.cwd()
 
 
 def detect_jushi_dir(base: Path) -> Path:
@@ -2947,8 +2950,7 @@ if act_complete:
 
         today_str = datetime.now().strftime("%y%m%d")
         userprofile = Path(os.environ.get("USERPROFILE", Path.home()))
-        sgt_cloud   = userprofile / "OneDrive" / "work" / "SGT_cloud"
-        out_dir     = sgt_cloud / "output" / "提出用" / today_str
+        out_dir     = Path(__file__).resolve().parent / "output" / "提出用" / today_str
         out_dir.mkdir(parents=True, exist_ok=True)
 
         pdf_list       = []
