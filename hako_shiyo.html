@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>梱包箱使用数</title>
+<style>
+  /* スクロールバー */
+  :root { --accent:#d97757; --accent-hi:#e89070; }
+  ::-webkit-scrollbar              { width:17px; height:17px; }
+  ::-webkit-scrollbar-track        { background:#1C1C1C; }
+  ::-webkit-scrollbar-thumb        { background:var(--accent); border-radius:6px; border:2px solid #1C1C1C; }
+  ::-webkit-scrollbar-thumb:hover  { background:var(--accent-hi); }
+  ::-webkit-scrollbar-corner       { background:#1C1C1C; }
+  html,body{scrollbar-width:auto;scrollbar-color:var(--accent) #1C1C1C;}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#1a1a1a;color:#e0e0e0;font-family:'Segoe UI','Yu Gothic UI',sans-serif;font-size:14px;}
+header{background:#161616;color:#fff;padding:6px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:20;}
+header h1{font-size:17px;font-weight:700;}
+header .sub{font-size:12px;opacity:.5;}
+.badge{background:#e86a00;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;}
+.filter-bar{padding:6px 14px;background:#1e1e1e;border-bottom:1px solid #2a2a2a;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.filter-bar label{font-size:12px;color:#aaa;}
+.filter-bar select,.filter-bar input[type=text]{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a;border-radius:4px;padding:3px 8px;font-size:12px;}
+.filter-bar select:focus{outline:none;border-color:#e86a00;}
+.main-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;}
+thead th{position:sticky;top:0;background:#161616;color:#e0e0e0;font-size:12px;font-weight:600;padding:6px 10px;border-bottom:2px solid #333;border-right:1px solid #2a2a2a;white-space:nowrap;cursor:pointer;user-select:none;}
+thead th:hover{background:#222;}
+thead th .sort-icon{opacity:.4;margin-left:4px;font-size:10px;}
+thead th.sorted .sort-icon{opacity:1;color:#e86a00;}
+tbody tr{border-bottom:1px solid #252525;}
+tbody tr:hover{background:#222;}
+tbody td{padding:6px 10px;border-right:1px solid #232323;font-size:13px;white-space:nowrap;}
+td.nm{max-width:260px;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#ccc;}
+td.qty{text-align:right;color:#7bb8f5;}
+td.af{color:#a0c8a0;font-size:12px;}
+td.hako{color:#f5c97b;}
+td.shosu{text-align:right;font-weight:700;color:#e86a00;font-size:14px;}
+td.hako-null{color:#555;font-style:italic;}
+.done-row{opacity:.4;}
+.summary-wrap{padding:14px;}
+.summary-title{font-size:13px;color:#aaa;margin-bottom:8px;font-weight:600;}
+.summary-grid{display:flex;flex-wrap:wrap;gap:8px;}
+.hako-chip{background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:6px 14px;min-width:120px;display:flex;flex-direction:column;gap:2px;}
+.hako-chip .chip-name{font-size:12px;color:#f5c97b;}
+.hako-chip .chip-count{font-size:18px;font-weight:700;color:#e86a00;}
+.hako-chip .chip-label{font-size:10px;color:#666;}
+.empty{padding:40px;text-align:center;color:#555;}
+</style>
+</head>
+<body>
+<header>
+  <h1>梱包箱 使用数</h1>
+  <span class="sub" id="hd-sub"></span>
+  <span class="badge" id="hd-badge" style="display:none"></span>
+</header>
+<div class="filter-bar">
+  <label>引取日</label>
+  <select id="fil-af"><option value="">すべて</option></select>
+  <label style="margin-left:10px;">梱包箱</label>
+  <select id="fil-hako"><option value="">すべて</option></select>
+  <label style="margin-left:10px;display:flex;align-items:center;gap:4px;">
+    <input type="checkbox" id="fil-undone" checked> 未完了のみ
+  </label>
+</div>
+<div class="main-wrap">
+  <table id="main-table">
+    <thead><tr>
+      <th data-col="nm">品名 <span class="sort-icon">▲</span></th>
+      <th data-col="qty">依頼数 <span class="sort-icon">▲</span></th>
+      <th data-col="af" class="sorted">引取日 <span class="sort-icon">▲</span></th>
+      <th data-col="hako">梱包箱 <span class="sort-icon">▲</span></th>
+      <th data-col="shosu">使用数 <span class="sort-icon">▲</span></th>
+    </tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="empty" id="empty-msg" style="display:none">該当するタスクがありません</div>
+</div>
+<div class="summary-wrap">
+  <div class="summary-title">▼ 梱包箱 合計使用数（フィルター適用中）</div>
+  <div class="summary-grid" id="summary-grid"></div>
+</div>
+<script>
+// ── app.py がここを書き換えてデータを注入する ──
+const HAKO_ROWS = [];
+// ─────────────────────────────────────────────
+let sortCol='af', sortAsc=true;
+
+function normDate(s){
+  if(!s) return '';
+  const m=s.match(/^(\d{2})\/(\d{2})$/);
+  return m ? '2026/'+m[1]+'/'+m[2] : s;
+}
+
+function buildFilters(){
+  const afSel=document.getElementById('fil-af');
+  const hakoSel=document.getElementById('fil-hako');
+  [...new Set(HAKO_ROWS.map(r=>r.af||'').filter(Boolean))].sort()
+    .forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;afSel.appendChild(o);});
+  [...new Set(HAKO_ROWS.map(r=>r.hako||'').filter(Boolean))].sort()
+    .forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;hakoSel.appendChild(o);});
+}
+
+function getFiltered(){
+  const afV=document.getElementById('fil-af').value;
+  const hakoV=document.getElementById('fil-hako').value;
+  const undone=document.getElementById('fil-undone').checked;
+  return HAKO_ROWS.filter(r=>{
+    if(afV && r.af!==afV) return false;
+    if(hakoV && r.hako!==hakoV) return false;
+    if(undone && r.done) return false;
+    return true;
+  });
+}
+
+function sortRows(rows){
+  return [...rows].sort((a,b)=>{
+    let av=a[sortCol]??'', bv=b[sortCol]??'';
+    if(sortCol==='af'){av=normDate(av);bv=normDate(bv);}
+    if(sortCol==='qty'||sortCol==='shosu'){av=+av||0;bv=+bv||0;}
+    if(av<bv) return sortAsc?-1:1;
+    if(av>bv) return sortAsc?1:-1;
+    return 0;
+  });
+}
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function render(){
+  const filtered=getFiltered();
+  const rows=sortRows(filtered);
+  const tbody=document.getElementById('tbody');
+  if(!rows.length){
+    tbody.innerHTML='';
+    document.getElementById('empty-msg').style.display='';
+  } else {
+    document.getElementById('empty-msg').style.display='none';
+    tbody.innerHTML=rows.map(r=>{
+      const dc=r.done?' done-row':'';
+      const hakoTd=r.hako?`<td class="hako${dc}">${esc(r.hako)}</td>`:`<td class="hako-null${dc}">—</td>`;
+      const shosuTd=r.hako?`<td class="shosu${dc}">${r.shosu}</td>`:`<td class="shosu${dc}" style="color:#555">—</td>`;
+      return `<tr><td class="nm${dc}" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="qty${dc}">${r.qty}</td><td class="af${dc}">${esc(r.af||'—')}</td>${hakoTd}${shosuTd}</tr>`;
+    }).join('');
+  }
+  const badge=document.getElementById('hd-badge');
+  document.getElementById('hd-sub').textContent=`${rows.length} 件`;
+  if(rows.length!==HAKO_ROWS.length){badge.textContent=`全${HAKO_ROWS.length}件中`;badge.style.display='';}
+  else badge.style.display='none';
+  renderSummary(rows);
+}
+
+function renderSummary(rows){
+  const map={};
+  rows.forEach(r=>{if(r.hako) map[r.hako]=(map[r.hako]||0)+(r.shosu||0);});
+  const grid=document.getElementById('summary-grid');
+  const keys=Object.keys(map).sort();
+  if(!keys.length){grid.innerHTML='<span style="color:#555;font-size:12px;">表示中のタスクに箱情報がありません</span>';return;}
+  grid.innerHTML=keys.map(k=>`<div class="hako-chip"><span class="chip-name">${esc(k)}</span><span class="chip-count">${map[k]}</span><span class="chip-label">枚</span></div>`).join('');
+}
+
+function updateSortIcons(){
+  document.querySelectorAll('thead th[data-col]').forEach(th=>{
+    const c=th.dataset.col;
+    th.classList.toggle('sorted',c===sortCol);
+    th.querySelector('.sort-icon').textContent=(c===sortCol)?(sortAsc?'▲':'▼'):'▲';
+  });
+}
+
+document.querySelectorAll('thead th[data-col]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const c=th.dataset.col;
+    if(sortCol===c) sortAsc=!sortAsc;
+    else{sortCol=c;sortAsc=true;}
+    updateSortIcons();render();
+  });
+});
+document.getElementById('fil-af').addEventListener('change',render);
+document.getElementById('fil-hako').addEventListener('change',render);
+document.getElementById('fil-undone').addEventListener('change',render);
+
+buildFilters();updateSortIcons();render();
+</script>
+</body>
+</html>

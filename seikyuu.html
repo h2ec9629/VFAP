@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>請求ページ — 月別工賃集計</title>
+<style>
+  :root{
+    --bg:#1c1c1c; --panel:#222; --line:#333; --ink:#e8e8e8; --sub:#888;
+    --head:#161616; --headtxt:#fff;
+    --accent:#d97757; --accent-hi:#e89070;
+    --green:#2e9e5b; --red:#d23b3b; --blue:#7ba7d9; --yellow:#d9b923;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;min-height:100%;font-family:"游ゴシック","Yu Gothic",sans-serif;
+            background:var(--bg);color:var(--ink);}
+
+  /* スクロールバー */
+  ::-webkit-scrollbar              { width:17px; height:17px; }
+  ::-webkit-scrollbar-track        { background:#1C1C1C; }
+  ::-webkit-scrollbar-thumb        { background:var(--accent); border-radius:6px; border:2px solid #1C1C1C; }
+  ::-webkit-scrollbar-thumb:hover  { background:var(--accent-hi); }
+  ::-webkit-scrollbar-corner       { background:#1C1C1C; }
+  html,body{scrollbar-width:auto;scrollbar-color:var(--accent) #1C1C1C;}
+
+  /* ヘッダー */
+  header{background:var(--head);padding:8px 16px;border-bottom:2px solid #2a2a2a;
+         display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:50;}
+  header h1{font-size:18px;font-weight:700;margin:0;color:#e8e8e8;}
+  header .sub{font-size:12px;color:var(--sub);}
+  #status-msg{font-size:12px;color:var(--sub);margin-left:auto;}
+
+  /* 月タブ（非表示） */
+  .month-tabs{display:none!important;}
+
+  /* 月選択グリッド */
+  .month-grid-wrap{flex-shrink:0;}
+  .month-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:216px;}
+  .month-btn{background:#1e1e1e;border:1px solid #2a2a2a;color:#444;font-size:18px;
+             font-weight:600;padding:9px 3px;border-radius:4px;cursor:default;
+             text-align:center;transition:background .12s,color .12s;}
+  .month-btn.has-data{color:#888;border-color:#3a3a3a;cursor:pointer;}
+  .month-btn.has-data:hover{background:#272727;color:#bbb;}
+  .month-btn.selected{background:var(--accent)!important;color:#fff!important;
+                      border-color:var(--accent)!important;}
+  .month-btn.selected:hover{background:var(--accent-hi)!important;}
+
+  /* メインコンテンツ */
+  .page-content{padding:16px;}
+
+  /* 月ヘッダー */
+  .month-header{font-size:16px;font-weight:700;color:var(--accent);
+                margin:0 0 12px;padding-bottom:6px;border-bottom:1px solid #333;}
+
+  /* 明細テーブル */
+  .billing-wrap{overflow-x:auto;margin-bottom:24px;}
+  table.billing{border-collapse:collapse;width:100%;font-size:13px;min-width:720px;}
+  table.billing th{background:#161616;color:#aaa;font-size:12px;padding:7px 10px;
+                   border-bottom:2px solid #444;text-align:right;white-space:nowrap;font-weight:600;}
+  table.billing th.left{text-align:left;}
+  table.billing td{padding:6px 10px;border-bottom:1px solid #282828;white-space:nowrap;text-align:right;}
+  table.billing td.left{text-align:left;}
+  table.billing tbody tr:hover td{background:rgba(217,119,87,.08);}
+  table.billing .no-col{color:var(--accent);font-weight:600;font-family:monospace;font-size:12px;}
+  table.billing .nm-col{color:#c8c8c8;text-align:left;white-space:nowrap;}
+  table.billing .tanka-col{color:var(--yellow);}
+  table.billing .koji-col{color:#7fd97f;font-weight:700;}
+  table.billing .gyotai-col{color:var(--blue);text-align:left;}
+  /* 区切り線（工賃と業態の間） */
+  .sep-col{width:20px;border-left:2px solid #333;border-right:none;}
+  table.billing .zero{color:#555;}
+  /* 日付グループ区切り線（画面） */
+  table.billing tr.date-start td{border-top:2px solid #444!important;}
+  /* 納品日・伝票Noセル */
+  table.billing .date-col{
+    text-align:center;vertical-align:middle;white-space:nowrap;
+    color:#bbb;font-size:12px;font-weight:700;
+    background:#1a1a1a;border-right:1px solid #303030;width:56px;
+  }
+  table.billing .denno-col{
+    text-align:center;vertical-align:middle;white-space:nowrap;
+    color:#c88040;font-size:12px;font-weight:700;
+    background:#1a1a1a;border-right:2px solid #383838;width:48px;
+  }
+
+  /* レイアウト */
+  .main-row{margin-bottom:8px;}
+  .billing-wrap{overflow-x:auto;margin-bottom:16px;}
+
+  /* 業態別集計＋配送サマリー */
+  .gyotai-section{display:flex;justify-content:space-between;align-items:flex-start;
+                  gap:16px;margin-bottom:20px;}
+  .gyotai-inner{width:300px;margin-left:auto;}
+
+  /* 配送サマリー */
+  .haiso-summary{flex:1;min-width:0;}
+  .haiso-summary-inner{display:inline-block;}
+  .haiso-kpi-row{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;}
+  .haiso-kpi{background:#1e2530;border:1px solid #2a3545;border-radius:8px;
+             padding:18px 27px;min-width:135px;text-align:center;}
+  .haiso-kpi .kpi-num{font-size:39px;font-weight:700;color:#7ba7d9;line-height:1.1;}
+  .haiso-kpi .kpi-label{font-size:17px;color:#778;margin-top:4px;}
+  .haiso-kpi.accent .kpi-num{color:#e8e8e8;}
+  .haiso-detail{font-size:18px;color:#666;display:flex;gap:16px;flex-wrap:wrap;}
+  .haiso-detail span{white-space:nowrap;}
+  .haiso-detail .hl{color:#aaa;font-weight:600;}
+
+  /* 切替ボタン */
+  .btn-toggle-summary{background:#252525;border:1px solid #3a3a3a;color:#888;
+                      font-size:11px;padding:3px 10px;border-radius:4px;
+                      cursor:pointer;margin-bottom:8px;display:inline-block;}
+  .btn-toggle-summary:hover{background:#2e2e2e;color:#bbb;}
+  .section-label{font-size:11px;font-weight:700;color:#666;text-transform:uppercase;
+                 letter-spacing:.06em;margin-bottom:10px;}
+  table.subtotal{border-collapse:collapse;width:100%;font-size:15px;}
+  table.subtotal th{background:#161616;color:#888;font-size:11px;padding:7px 14px;
+                    border-bottom:2px solid #444;text-align:right;white-space:nowrap;font-weight:600;}
+  table.subtotal th.left{text-align:left;}
+  table.subtotal td{padding:9px 14px;border-bottom:1px solid #252525;text-align:right;}
+  table.subtotal td.left{text-align:left;color:var(--blue);font-weight:700;font-size:15px;}
+  table.subtotal td.val{color:#d0d0d0;font-size:15px;}
+  table.subtotal td.koji{color:#7fd97f;font-weight:700;font-size:16px;}
+  table.subtotal tr.total-row td{border-top:2px solid #555;color:#e8e8e8;font-weight:700;
+                                  background:#1d1d1d;font-size:16px;}
+  table.subtotal tr.total-row td.koji{color:#f0c060;font-size:17px;}
+
+  /* 全体合計バー */
+  .grand-total{background:#1d2820;border:1px solid #2e4a2e;border-radius:8px;
+               padding:14px 20px;display:flex;gap:40px;align-items:center;flex-wrap:wrap;
+               margin-top:8px;}
+  .grand-total .gt-label{font-size:12px;color:#888;}
+  .grand-total .gt-val{font-size:22px;font-weight:700;color:#7fd97f;}
+  .grand-total .gt-item{display:flex;flex-direction:column;gap:3px;}
+  .grand-total .gt-title{font-size:14px;color:#aaa;font-weight:700;margin-right:auto;}
+
+  /* 空状態 */
+  .empty-msg{color:#666;padding:40px 0;text-align:center;font-size:14px;}
+
+  /* ローディング */
+  .loading{color:#888;padding:30px 0;text-align:center;}
+
+  /* PDF出力ボタン */
+  .btn-pdf{background:#e86a00!important;color:#fff!important;border:1px solid #e86a00!important;
+           font-weight:700;padding:5px 14px;border-radius:5px;cursor:pointer;font-size:13px;}
+  .btn-pdf:hover{background:#c55a00!important;}
+
+  /* 業態カラー（画面） */
+  table.billing td[data-gyotai="LED"]  {background:#1b2a3a;color:#7ba7d9;font-weight:700;text-align:left;}
+  table.billing td[data-gyotai="灯具"] {background:#1a2a1a;color:#7fd97f;font-weight:700;text-align:left;}
+  table.billing td[data-gyotai="樹脂"] {background:#2d1e0e;color:#d9a057;font-weight:700;text-align:left;}
+
+  /* 印刷フッター・印刷ヘッダー（画面では非表示） */
+  .print-foot{display:none;}
+  .pdf-header{display:none;}
+  /* 印刷専用 業態別集計（画面では非表示） */
+  .gyotai-print{display:none;}
+
+/* ━━━ 印刷スタイル ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+@media print{
+  /* A4縦・最大2枚を想定 */
+  @page{
+    size:A4 portrait;
+    margin:8mm 10mm 14mm;   /* 下マージンをフッター分確保 */
+    @bottom-left{
+      content:"切断加工数量明細";
+      font-family:'Meiryo','Yu Gothic UI',sans-serif;
+      font-size:7.5pt;color:#555;
+    }
+    @bottom-right{
+      content:counter(page) " / " counter(pages) " ページ";
+      font-family:'Meiryo','Yu Gothic UI',sans-serif;
+      font-size:7.5pt;color:#555;
+    }
+  }
+
+  header{display:none!important;}
+  .month-tabs{display:none!important;}
+  .btn-pdf{display:none!important;}
+  .grand-total{display:none!important;}
+
+  html,body{background:#fff!important;color:#1a1a1a!important;
+            font-family:'Segoe UI','Meiryo','Yu Gothic UI',sans-serif;font-size:8pt;}
+  .page-content{padding:0;}
+  .main-row{margin-bottom:4px;}
+  .billing-wrap{overflow:visible;}
+
+  /* PDF先頭ヘッダー */
+  .pdf-header{display:block;margin-bottom:8px;}
+  .pdf-header .pdf-title-1{font-size:15pt;font-weight:700;color:#1a1a1a;
+                            letter-spacing:1px;display:block;margin-bottom:3px;}
+  .pdf-header .pdf-title-2{font-size:11pt;font-weight:600;color:#1a1a1a;
+                            letter-spacing:.5px;display:block;margin-bottom:6px;}
+
+  /* 月ヘッダー（印刷時は非表示、pdf-headerで代替） */
+  .month-header{display:none!important;}
+
+  /* ━ 明細テーブル ━ */
+  /* min-widthをリセットしてA4縦幅に収める */
+  table.billing{font-size:7.5pt;border-collapse:collapse;width:100%;
+                table-layout:fixed;min-width:0!important;}
+  /* 列幅を th:nth-child で固定、品名(4列目)が残り幅を使う
+     A4縦 印刷可能幅 ≈ 190mm 基準
+     固定計: 13+11+11+14+14+18+22+4+14 = 121mm → 品名 ≈ 69mm */
+  table.billing th:nth-child(1){width:13mm;}  /* 納品日 */
+  table.billing th:nth-child(2){width:14mm;}  /* 伝票No */
+  table.billing th:nth-child(3){width:14mm;}  /* 明細No */
+  table.billing th:nth-child(4){width:auto;}  /* 品名（残り全部） */
+  table.billing th:nth-child(5){width:14mm;}  /* 加工数 */
+  table.billing th:nth-child(6){width:14mm;}  /* 不良計 */
+  table.billing th:nth-child(7){width:18mm;}  /* 単価 */
+  table.billing th:nth-child(8){width:22mm;}  /* 工賃 */
+  table.billing th:nth-child(9){width:4mm;}   /* sep */
+  table.billing th:nth-child(10){width:14mm;} /* 業態 */
+
+  table.billing th{background:#4d4d4d!important;color:#fff!important;padding:4px 5px;
+                   border:1px solid #4d4d4d;text-align:center;font-weight:600;
+                   -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.billing td{padding:3px 5px;border:none;border-bottom:1px solid #e4e4e4!important;
+                   color:#1a1a1a!important;background:transparent!important;}
+  table.billing .date-col{background:#ebebeb!important;color:#1a1a1a!important;
+                   border-right:1px solid #ccc!important;font-weight:700;text-align:center;
+                   -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.billing .denno-col{background:#e0e0e0!important;color:#1a1a1a!important;
+                   border-right:2px solid #999!important;font-weight:700;text-align:center;
+                   -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.billing .sep-col{border-left:2px solid #bbb!important;padding:0;width:6px;}
+  table.billing .no-col{color:#1a1a1a!important;font-weight:700;}
+  table.billing .tanka-col,.billing .koji-col{color:#1a1a1a!important;font-weight:700;}
+  table.billing .zero{color:#bbb!important;}
+  table.billing .nm-col{color:#1a1a1a!important;white-space:nowrap!important;overflow:hidden!important;}
+  /* 日付グループ区切り線（印刷） */
+  table.billing tr.date-start td{border-top:1.5pt solid #777!important;
+                                  -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+
+  /* 同一日付グループはページ跨ぎしない */
+  table.billing tbody.date-group{
+    page-break-inside:avoid;
+    break-inside:avoid;
+  }
+
+  /* 業態カラー（白黒印刷対応：グレー濃淡＋パターン） */
+  table.billing td[data-gyotai="LED"]{
+    background:repeating-linear-gradient(135deg,#f0f0f0 0,#f0f0f0 3px,#fff 3px,#fff 6px)!important;
+    color:#1a1a1a!important;font-weight:700;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.billing td[data-gyotai="灯具"]{
+    background:#d8d8d8!important;color:#1a1a1a!important;font-weight:700;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.billing td[data-gyotai="樹脂"]{
+    background:repeating-linear-gradient(45deg,#c0c0c0 0,#c0c0c0 3px,#ddd 3px,#ddd 6px)!important;
+    color:#1a1a1a!important;font-weight:700;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+
+  /* ━ 配送サマリー・表示月 → 印刷時非表示 ━ */
+  .haiso-summary{display:none!important;}
+  .month-grid-wrap{display:none!important;}
+  /* ━ 業態別集計（gyotai-section内）→ 印刷時非表示 ━ */
+  .gyotai-section{display:none!important;}
+  /* ━ 印刷専用 業態別集計（明細テーブル直後・右寄せ）━ */
+  .gyotai-print{display:flex;justify-content:flex-end;margin-top:10px;
+                page-break-inside:avoid;break-inside:avoid;}
+  .gyotai-print .gyotai-inner{width:240px;}
+  .section-label{font-size:7.5pt;color:#555;font-weight:700;margin-bottom:3px;}
+  table.subtotal{font-size:8.5pt;width:100%;}
+  table.subtotal th{background:#4d4d4d!important;color:#fff!important;padding:4px 8px;
+                    border:1px solid #4d4d4d;font-weight:600;
+                    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.subtotal td{padding:4px 8px;border:none;border-bottom:1px solid #ddd!important;
+                    color:#1a1a1a!important;font-size:9pt;}
+  table.subtotal tr.total-row td{background:#e8e8e8!important;font-weight:700;font-size:10pt;
+                    border-top:2px solid #555!important;
+                    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+
+  /* 印刷フッター（@pageマージンボックスに移行済みのため非表示） */
+  .print-foot{display:none!important;}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📋 請求</h1>
+  <span class="sub">月別工賃集計</span>
+  <span id="status-msg">読み込み中…</span>
+  <button class="btn-pdf" onclick="window.print()">🖨 PDF出力</button>
+</header>
+
+<div class="month-tabs" id="month-tabs"></div>
+
+<div class="page-content" id="page-content">
+  <div class="loading">データを取得中…</div>
+</div>
+<div class="print-foot">黒部工業株式会社　／　加工明細・請求一覧</div>
+
+<script>
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// app.py が正規表現で差し込むプレースホルダー
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let NITTEI_ROWS = [];
+const VFDB_ROWS = [];
+
+// kakou_kiroku サーバーポート
+const KAKOU_PORT = 8503;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ユーティリティ
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function fmt(n) {
+  if (n == null || n === '') return '—';
+  return Number(n).toLocaleString('ja-JP');
+}
+function fmtMoney(n) {
+  if (!n) return '¥0';
+  return '¥' + Number(n).toLocaleString('ja-JP');
+}
+function zeroClass(n) {
+  return (!n || n === 0) ? ' zero' : '';
+}
+
+// 月名表示
+const MONTH_JP = ['','1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// データ結合処理
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function buildBillingData(kakouList) {
+  // vfdb: 品名(trim) → {単価, 業態}
+  const vfdbMap = {};
+  for (const v of VFDB_ROWS) {
+    const nm = (v['品名'] || '').trim();
+    if (nm) vfdbMap[nm] = v;
+  }
+
+  // kakou_kiroku: meisai_no → record
+  const kakouMap = {};
+  for (const k of kakouList) {
+    kakouMap[String(k.meisai_no)] = k;
+  }
+
+  // nittei 各行を加工
+  const result = [];
+  for (const row of NITTEI_ROWS) {
+    const adStr = row.ad || '';
+    if (!adStr) continue;
+    const parts = adStr.split('/');
+    if (parts.length < 2) continue;
+    const month = parseInt(parts[0], 10);
+    if (!month || month < 1 || month > 12) continue;
+
+    const vf    = vfdbMap[(row.nm || '').trim()] || {};
+    const kakou = kakouMap[String(row.no)] || null;
+
+    // 加工 = daily.kakou_su 合計
+    const kakouSu = kakou
+      ? (kakou.daily || []).reduce((s, d) => s + (d.kakou_su || 0), 0)
+      : 0;
+    // 不良計 = furyou 合計
+    const furyouKei = kakou && kakou.furyou
+      ? Object.values(kakou.furyou).reduce((s, v) => s + (v || 0), 0)
+      : 0;
+
+    const shinsokuSu = row.qty   || 0;
+    const tanka      = vf['単価'] != null ? Number(vf['単価']) : null;
+    const gyotai     = vf['業態'] || row.grp || '';
+    const koji       = tanka != null ? (shinsokuSu + furyouKei) * tanka : null;
+    const denno      = row.denno || '';
+
+    // 明細Noは先頭ゼロ除去
+    const noDisp = String(row.no).replace(/^0+/, '') || row.no;
+
+    result.push({
+      no: noDisp, nm: row.nm || '', month,
+      shinsokuSu, kakouSu, furyouKei,
+      tanka, gyotai, koji,
+      _ad: adStr, denno,
+    });
+  }
+
+  // 月別にグループ化
+  const byMonth = {};
+  for (const r of result) {
+    if (!byMonth[r.month]) byMonth[r.month] = [];
+    byMonth[r.month].push(r);
+  }
+  return byMonth;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// レンダリング
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _byMonth = {};
+let _selectedMonths = new Set();
+
+function toggleMonth(m) {
+  if (_selectedMonths.has(m)) {
+    if (_selectedMonths.size > 1) _selectedMonths.delete(m); // 最低1ヶ月は選択維持
+  } else {
+    _selectedMonths.add(m);
+  }
+  renderContent();
+}
+
+function renderTabs() { /* 月グリッドに移行済み — no-op */ }
+
+function renderContent() {
+  const el = document.getElementById('page-content');
+
+  // 選択月のデータを合算
+  const rows = [];
+  for (const m of _selectedMonths) {
+    if (_byMonth[m]) rows.push(..._byMonth[m]);
+  }
+  if (rows.length === 0) {
+    el.innerHTML = '<div class="empty-msg">選択した月の明細がありません</div>';
+    return;
+  }
+
+  // 月→納品日→伝票No順でソート
+  const sorted = [...rows].sort((a, b) => {
+    if (a.month !== b.month) return a.month - b.month;
+    if (a._ad !== b._ad) return a._ad < b._ad ? -1 : 1;
+    if ((a.denno||'') !== (b.denno||'')) return (a.denno||'') < (b.denno||'') ? -1 : 1;
+    return 0;
+  });
+
+  // rowspan汎用計算
+  function calcSpan(arr, keyFn) {
+    const map = new Array(arr.length).fill(0);
+    let i = 0;
+    while (i < arr.length) {
+      const val = keyFn(arr[i]);
+      let span = 1;
+      while (i + span < arr.length && keyFn(arr[i + span]) === val) span++;
+      map[i] = span;
+      for (let j = i + 1; j < i + span; j++) map[j] = 0;
+      i += span;
+    }
+    return map;
+  }
+  const adSpan    = calcSpan(sorted, r => r._ad);
+  const dennoSpan = calcSpan(sorted, r => r.denno || '');
+
+  // ── 明細テーブル ──────────────────────
+  let tHead = `<thead><tr>
+    <th style="text-align:center">納品日</th>
+    <th style="text-align:center">伝票No</th>
+    <th class="left">明細No</th>
+    <th class="left">品名</th>
+    <th>加工数</th>
+    <th>不良計</th>
+    <th>単価</th>
+    <th>工賃</th>
+    <th class="sep-col"></th>
+    <th class="left">業態</th>
+  </tr></thead>`;
+
+  let tBody = '';
+  for (let idx = 0; idx < sorted.length; idx++) {
+    const r = sorted[idx];
+    // 日付グループ境界：新しい日付が始まるたびに tbody を分割
+    if (adSpan[idx] > 0) {
+      if (idx > 0) tBody += '</tbody>';
+      tBody += '<tbody class="date-group">';
+    }
+    const dateCell = adSpan[idx] > 0
+      ? `<td class="date-col" rowspan="${adSpan[idx]}">${escHtml(r._ad)}</td>`
+      : '';
+    const dennoCell = dennoSpan[idx] > 0
+      ? `<td class="denno-col" rowspan="${dennoSpan[idx]}">${escHtml(r.denno || '—')}</td>`
+      : '';
+    tBody += `<tr${adSpan[idx] > 0 ? ' class="date-start"' : ''}>
+      ${dateCell}
+      ${dennoCell}
+      <td class="left no-col">${r.no}</td>
+      <td class="nm-col">${escHtml(r.nm)}</td>
+      <td class="${zeroClass(r.shinsokuSu)}">${fmt(r.shinsokuSu)}</td>
+      <td class="${r.furyouKei > 0 ? 'red' : 'zero'}">${fmt(r.furyouKei)}</td>
+      <td class="tanka-col">${r.tanka != null ? fmt(r.tanka) : '—'}</td>
+      <td class="koji-col${r.koji == null ? ' zero' : ''}">${r.koji != null ? fmtMoney(r.koji) : '—'}</td>
+      <td class="sep-col"></td>
+      <td class="gyotai-col" data-gyotai="${escHtml(r.gyotai)}">${escHtml(r.gyotai)}</td>
+    </tr>`;
+  }
+  tBody += '</tbody>';
+
+  // ── 業態別集計 ──────────────────────
+  const gyotaiMap = {};
+  for (const r of rows) {
+    const g = r.gyotai || '（不明）';
+    if (!gyotaiMap[g]) gyotaiMap[g] = { kakouSu: 0, furyouKei: 0, koji: 0 };
+    gyotaiMap[g].kakouSu  += r.kakouSu;
+    gyotaiMap[g].furyouKei += r.furyouKei;
+    gyotaiMap[g].koji     += r.koji || 0;
+  }
+  const gyotais = Object.entries(gyotaiMap).sort((a,b) => a[0].localeCompare(b[0]));
+
+  let subRows = '';
+  let grandKakouSu = 0, grandFuryouKei = 0, grandKoji = 0;
+  for (const [g, v] of gyotais) {
+    grandKakouSu  += v.kakouSu;
+    grandFuryouKei += v.furyouKei;
+    grandKoji     += v.koji;
+    subRows += `<tr>
+      <td class="left">${escHtml(g)}</td>
+      <td class="val">${fmt(v.kakouSu)}</td>
+      <td class="val">${fmt(v.furyouKei)}</td>
+      <td class="koji">${fmtMoney(v.koji)}</td>
+    </tr>`;
+  }
+  subRows += `<tr class="total-row">
+    <td class="left">合計</td>
+    <td>${fmt(grandKakouSu)}</td>
+    <td>${fmt(grandFuryouKei)}</td>
+    <td class="koji">${fmtMoney(grandKoji)}</td>
+  </tr>`;
+
+  // ── 配送サマリー計算（選択月全体） ──────────────────
+  const selMmStrs = new Set([..._selectedMonths].map(m => String(m).padStart(2,'0')));
+  const adDates = new Set();
+  const acDates = new Set();
+  for (const r of NITTEI_ROWS) {
+    if (r.ad) { const p=r.ad.split('/'); if(selMmStrs.has(p[0])) adDates.add(r.ad); }
+    if (r.ac) { const p=r.ac.split('/'); if(selMmStrs.has(p[0])) acDates.add(r.ac); }
+  }
+
+  // ── 月グリッドHTML ──────────────────
+  const allMonths = Object.keys(_byMonth).map(Number);
+  const MONTHS_LABEL = ['','1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  let monthGridHtml = '';
+  for (let m = 1; m <= 12; m++) {
+    const hasData = allMonths.includes(m);
+    const sel     = _selectedMonths.has(m);
+    const cls     = ['month-btn', hasData?'has-data':'', sel?'selected':''].join(' ').trim();
+    const onclick = hasData ? `onclick="toggleMonth(${m})"` : '';
+    monthGridHtml += `<button class="${cls}" ${onclick}>${MONTHS_LABEL[m]}</button>`;
+  }
+  // 出動日 = 納品日 ∪ 引取日（同日は1回）
+  const shutsudoSet = new Set([...adDates, ...acDates]);
+  const shutsudo    = shutsudoSet.size;
+  const adOnly      = [...adDates].filter(d => !acDates.has(d)).length;
+  const acOnly      = [...acDates].filter(d => !adDates.has(d)).length;
+  const both        = [...adDates].filter(d =>  acDates.has(d)).length;
+
+  // ── 月タイトル + HTML組み立て ──────────
+  const YEAR = 2026;
+  const selArr = [..._selectedMonths].sort((a,b)=>a-b);
+  const monthLabel = selArr.length === 1
+    ? (MONTH_JP[selArr[0]] ? `${YEAR}年 ${MONTH_JP[selArr[0]]}` : `${selArr[0]}月`)
+    : `${YEAR}年 ${selArr.map(m=>MONTH_JP[m]||m+'月').join('・')}`;
+  // PDF用タイトル（単月 or 複数月）
+  const mm = String(selArr[0]).padStart(2,'0');
+  const mmLast = String(selArr[selArr.length-1]).padStart(2,'0');
+  const lastDay = new Date(YEAR, selArr[selArr.length-1], 0).getDate();
+  const dd = String(lastDay).padStart(2,'0');
+  const pdfTitle2 = selArr.length === 1
+    ? `${YEAR}年${mm}月度（${mm}/01 ～ ${mm}/${dd}）　切断加工数量明細`
+    : `${YEAR}年${mm}月度〜${mmLast}月度（${mm}/01 ～ ${mmLast}/${dd}）　切断加工数量明細`;
+
+  el.innerHTML = `
+    <div class="pdf-header">
+      <span class="pdf-title-1">ビニフレーム工業株式会社　御中</span>
+      <span class="pdf-title-2">${pdfTitle2}</span>
+    </div>
+
+    <div class="month-header">${monthLabel}</div>
+
+    <div class="gyotai-section">
+      <div class="haiso-summary">
+        <div class="section-label">
+          配送サマリー
+          <button class="btn-toggle-summary" onclick="
+            const s=this.closest('.haiso-summary').querySelector('.haiso-summary-inner');
+            const hidden=s.style.display==='none';
+            s.style.display=hidden?'':'none';
+            this.textContent=hidden?'▲ 非表示':'▼ 表示';
+          ">▲ 非表示</button>
+        </div>
+        <div class="haiso-summary-inner">
+          <div class="haiso-kpi-row">
+            <div class="haiso-kpi accent">
+              <div class="kpi-num">${shutsudo}</div>
+              <div class="kpi-label">出動日数</div>
+            </div>
+            <div class="haiso-kpi">
+              <div class="kpi-num">${adDates.size}</div>
+              <div class="kpi-label">納品日数</div>
+            </div>
+            <div class="haiso-kpi">
+              <div class="kpi-num">${acDates.size}</div>
+              <div class="kpi-label">引取日数</div>
+            </div>
+          </div>
+          <div class="haiso-detail">
+            <span>納品のみ <span class="hl">${adOnly}日</span></span>
+            <span>引取のみ <span class="hl">${acOnly}日</span></span>
+            <span>納品＋引取（同日） <span class="hl">${both}日</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="month-grid-wrap">
+        <div class="section-label">表示月</div>
+        <div class="month-grid">${monthGridHtml}</div>
+      </div>
+
+      <div class="gyotai-inner">
+        <div class="section-label">業態別集計</div>
+        <table class="subtotal">
+          <thead><tr>
+            <th class="left">業態</th>
+            <th>加工数</th>
+            <th>不良計</th>
+            <th>工賃</th>
+          </tr></thead>
+          <tbody>${subRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="main-row">
+      <div class="billing-wrap">
+        <table class="billing">${tHead}${tBody}</table>
+      </div>
+    </div>
+
+    <div class="gyotai-print">
+      <div class="gyotai-inner">
+        <div class="section-label">業態別集計</div>
+        <table class="subtotal">
+          <thead><tr>
+            <th class="left">業態</th>
+            <th>加工数</th>
+            <th>不良計</th>
+            <th>工賃</th>
+          </tr></thead>
+          <tbody>${subRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section-label">月合計</div>
+    <div class="grand-total">
+      <span class="gt-title">📊 ${monthLabel} 合計</span>
+      <div class="gt-item">
+        <span class="gt-label">加工数</span>
+        <span class="gt-val" style="color:#7ba7d9">${fmt(grandKakouSu)}</span>
+      </div>
+      <div class="gt-item">
+        <span class="gt-label">不良計</span>
+        <span class="gt-val" style="color:#d97757">${fmt(grandFuryouKei)}</span>
+      </div>
+      <div class="gt-item">
+        <span class="gt-label">工賃合計</span>
+        <span class="gt-val">${fmtMoney(grandKoji)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 初期化
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+document.addEventListener('DOMContentLoaded', async () => {
+  const statusEl = document.getElementById('status-msg');
+  let kakouList = [];
+
+  // kakou_kiroku をポート8503から取得（3秒タイムアウト付き）
+  try {
+    const _ac = new AbortController();
+    const _tid = setTimeout(() => _ac.abort(), 3000);
+    const resp = await fetch(`http://localhost:${KAKOU_PORT}/`, { cache: 'no-store', signal: _ac.signal });
+    clearTimeout(_tid);
+    if (resp.ok) {
+      const all = await resp.json();
+      kakouList = Array.isArray(all) ? all : [];
+    }
+  } catch (_e) {
+    statusEl.textContent = '加工記録サーバー未接続（不良計=0で表示）';
+  }
+
+  if (!NITTEI_ROWS || NITTEI_ROWS.length === 0) {
+    document.getElementById('page-content').innerHTML =
+      '<div class="empty-msg">日程データがありません。nittei.json を確認してください。</div>';
+    statusEl.textContent = 'データなし';
+    return;
+  }
+
+  _byMonth = buildBillingData(kakouList);
+  const _allMonths = Object.keys(_byMonth).map(Number).sort((a, b) => a - b);
+  if (_allMonths.length > 0) {
+    _selectedMonths = new Set([_allMonths[_allMonths.length - 1]]);
+  }
+  statusEl.textContent = kakouList.length > 0
+    ? `加工記録 ${kakouList.length}件 読み込み済`
+    : '加工記録未接続';
+  renderContent();
+});
+</script>
+</body>
+</html>
