@@ -1,0 +1,30 @@
+# データベース・機密ファイル
+*.db
+*.xlsm
+*.xlsx
+*.xls
+VFAPtoken.txt
+
+# 実行時生成JSONデータ
+nittei.json
+ondan_flat.json
+ondan_lookup.json
+vfdb.json
+
+# ログ・一時ファイル
+*.log
+*.pyc
+__pycache__/
+.env
+output/
+
+# アーカイブ・バックアップ
+_archive/
+*.bak
+
+# 入力元ファイル（読み取り専用ソース）
+input/
+
+# Windows系
+Thumbs.db
+desktop.ini
