@@ -326,8 +326,8 @@ def _make_meisaisho_pdf(ad_str: str, items: list, out_path) -> tuple:
         # ──────────────────────────────────────
         _TABLE_TOP = _ty - _BH - 8
 
-        # 列幅：Excel比率（B:C:E:F:G = 5.25:11.75:29.625:12.75:11.625）+ Lot列
-        _COL_UNITS = [5.25, 11.75, 29.625, 12.75, 11.625] + [16, 10] * 5
+        # 列幅：品名を広くするためLot列を圧縮（Lot日16→11, Lot箱10→7, 削減40u分を品名へ）
+        _COL_UNITS = [5.25, 11.75, 69.625, 12.75, 11.625] + [11, 7] * 5
         _scale = _TW / sum(_COL_UNITS)
         _CW = [u * _scale for u in _COL_UNITS]
 
@@ -424,7 +424,7 @@ def _make_meisaisho_pdf(ad_str: str, items: list, out_path) -> tuple:
                 _c.setFont(_JA, 8)
                 _c.drawCentredString(_cx(1) + _CW[1] / 2, _mid_y, _mn)
                 _hn = str(_it.get("hinmei", ""))
-                _fs_h = 9 if len(_hn) <= 15 else (8 if len(_hn) <= 20 else 7)
+                _fs_h = 9 if len(_hn) <= 30 else (8 if len(_hn) <= 42 else 7)
                 _c.setFont(_JA, _fs_h)
                 _c.drawString(_cx(2) + 2, _mid_y, _hn)
                 _qty = _it.get("qty", 0) or 0
@@ -1606,6 +1606,7 @@ def build_vfdb_spec_by_name() -> dict:
             "hoho1":  _v(r.get("梱包方法")),
             "hoho2":  _v(r.get("備考１")),
             "hoho3":  _v(r.get("備考２")),
+            "kosuu":  _v(r.get("切断工数")),  # 切断工数(本/h) — 日程表の進捗工数表示用
         }
     return out
 
@@ -2203,11 +2204,9 @@ if page_sel.startswith("日程表"):
             if _o:
                 if _o.get("品名"):
                     _nr["nm"] = _o["品名"]
-                # 残工数 = (注文数 - 進捗数) ÷ 切断工数
+                # 総工数 = 注文数 ÷ 切断工数（残数量で割らない）
                 _qty  = float(_o.get("数量") or 0)
-                _done = float(_nr.get("done", 0) or 0)
-                _remaining = max(0.0, _qty - _done)
-                _h = calc_hours(_remaining, _o.get("切断工数"))
+                _h = calc_hours(_qty, _o.get("切断工数"))
                 if _h is not None:
                     _nr["hours"] = _h
                 # 期限(af)が未設定なら依頼書ページの期限列（納品日）で補完
@@ -2216,12 +2215,8 @@ if page_sel.startswith("日程表"):
                     if _af:
                         _nr["af"] = _af
             else:
-                # 依頼書データなし → nittei.json の qty/done/hours から残工数を推算
-                _qty   = float(_nr.get("qty",   0) or 0)
-                _done  = float(_nr.get("done",  0) or 0)
-                _htot  = float(_nr.get("hours", 0) or 0)
-                if _qty > 0 and _htot > 0:
-                    _nr["hours"] = round(_htot * max(0.0, _qty - _done) / _qty, 1)
+                # 依頼書データなし → hours は総工数のまま保持（書き換えない）
+                pass
     today        = datetime.today()
     working_days = gen_working_days(today, n_days=60)
     today_str    = today.strftime("%m/%d")
