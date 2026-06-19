@@ -24,7 +24,20 @@ git commit -m "変更内容を一言で"
 git push
 ```
 
-- リモート: `https://github.com/h2ec9629/VFAP.git`（branch: master）
+- リモート: `https://github.com/h2ec9629/VFAP.git`（branch: main）
+
+## 開発環境
+
+- **作業フォルダ（主軸）**: `C:\Users\<user>\Desktop\dev\VFAP`
+- **GitHub**: `https://github.com/h2ec9629/VFAP`
+- **OneDrive**: バックアップ置き場（`C:\Users\<user>\OneDrive\work\VFAP`）
+  - DB・xlsm・json等のデータファイルはOneDriveにのみ存在する（Git管理外）
+  - コード編集はdev側で完結し、OneDriveには同期しない
+
+## ⚠️ 編集対象ファイルの原則
+
+**編集は必ず `C:\Users\user\Desktop\dev\VFAP` 側のファイルで行うこと。**
+OneDrive (`C:\Users\user\OneDrive\work\VFAP`) はレガシー兼バックアップであり、編集対象外。
 
 ## ファイル編集ルール
 
@@ -39,7 +52,7 @@ print(repr(c[-80:]))
 "
 ```
 
-- bashパス例: `/sessions/friendly-charming-bell/mnt/dev--VFAP/app.py`
+- bashパス例: `/sessions/.../mnt/dev/VFAP/app.py`
 - 末尾が正常な終端なら OK
 - 切れていたら Python の `append` モードで補完する
 
