@@ -1250,6 +1250,8 @@ function markClean(){
 }
 
 async function saveRows(){
+  // 編集中セルの値を保存前に確定（blur遅延コミット待ちで入力値が消えるのを防ぐ）
+  if(activeCell){ try{ commitEdit(activeCell, false); }catch(_){} }
   const btn = document.getElementById('save-btn');
   if(btn){ btn.disabled=true; btn.textContent='保存中…'; }
   try {
@@ -1687,7 +1689,8 @@ async function syncDoneFromKakou(rebuild=true){
     if(changed && rebuild && !activeCell) buildBody();
   }catch(e){ /* 加工記録サーバー未起動時などは静かにスキップ */ }
 }
-window.addEventListener('focus', ()=>syncDoneFromKakou());
+// [自動上書き撤去] フォーカス時のdone自動同期を停止（加工記録保存時のみ反映する方針）
+// window.addEventListener('focus', ()=>syncDoneFromKakou());
 
 // ── 起動時: サーバーから nittei.json を取得して rows にマージ ──
 (async function initRows(){
@@ -1711,7 +1714,7 @@ window.addEventListener('focus', ()=>syncDoneFromKakou());
   autoAssignDenno(true);
   buildHead(); buildBody();
   syncSimUI();
-  syncDoneFromKakou();
+  // [自動上書き撤去] 起動時のdone自動同期を停止（手入力doneを保持。doneは加工記録保存時のみ反映）
 })();
 </script>
 

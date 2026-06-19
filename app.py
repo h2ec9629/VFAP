@@ -1301,6 +1301,37 @@ class _KakouHandler(BaseHTTPRequestHandler):
                     all_records.append(record)
                 kakou_path.write_text(
                     json.dumps(all_records, ensure_ascii=False, indent=2), encoding="utf-8")
+                # 加工記録の保存時のみ、日程の進捗(done)に入庫数(nyuko_su)を反映する
+                try:
+                    _np = self.__class__.base_dir / "nittei.json"
+                    _nsu = record.get("nyuko_su")
+                    # 「完了」ボタン押下時(kanryo=true)のみ反映。下書き自動保存(kanryo=false)では done に触れない
+                    if _np.exists() and record.get("kanryo") and _nsu is not None:
+                        with _save_lock:
+                            _nrows = json.loads(_np.read_text(encoding="utf-8"))
+                            try:
+                                _nsu = int(_nsu)
+                            except Exception:
+                                _nsu = 0
+                            if _nsu < 0:
+                                _nsu = 0
+                            _mno = str(record.get("meisai_no"))
+                            _ch = False
+                            for _nr in _nrows:
+                                if str(_nr.get("no")) == _mno:
+                                    _q = int(_nr.get("qty", 0) or 0)
+                                    if _q and _nsu > _q:
+                                        _nsu = _q
+                                    if _nr.get("done") != _nsu:
+                                        _nr["done"] = _nsu
+                                        _ch = True
+                                    break
+                            if _ch:
+                                _np.write_text(
+                                    json.dumps(_nrows, ensure_ascii=False, indent=2),
+                                    encoding="utf-8")
+                except Exception:
+                    pass
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"ok":true}')
