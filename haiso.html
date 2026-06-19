@@ -381,7 +381,18 @@ function render(){
       tr.appendChild(mkTd(code,'code'));
       tr.appendChild(mkTd(g.nm,'nm'));
       tr.appendChild(mkTd(hakoNm,''));
-      tr.appendChild(mkTd(String(kyosu),'r'));
+      const kyosuTd=document.createElement('td');
+      kyosuTd.className='r';
+      kyosuTd.contentEditable='true';
+      kyosuTd.textContent=String(kyosu);
+      kyosuTd.addEventListener('keydown',function(e){
+        if(e.key==='Enter'){e.preventDefault();this.blur();}
+      });
+      kyosuTd.addEventListener('blur',function(){
+        if(!this.textContent.trim())this.textContent='—';
+        this.classList.toggle('edited',true);
+      });
+      tr.appendChild(kyosuTd);
       rtb.appendChild(tr);
     }
   }

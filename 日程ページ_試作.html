@@ -1118,7 +1118,11 @@ function commitEdit(ac, rebuild=true){
     rows[idx].done=n;
   }
   activeCell=null;
-  if(rebuild){buildBody();markDirty();toast('更新しました（保存ボタンで書き込み）');}
+  if(rebuild){
+    buildBody();
+    if(field==='done'){ saveRows(); }
+    else { markDirty(); toast('更新しました（保存ボタンで書き込み）'); }
+  }
 }
 
 function cancelEdit(ac){
