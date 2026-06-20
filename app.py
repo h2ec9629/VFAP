@@ -14,6 +14,7 @@ import pandas as pd
 import openpyxl
 from pathlib import Path
 import json
+import sqlite3
 import math
 import os
 import shutil
@@ -94,6 +95,88 @@ def _get_or_open_wb(excel, path: Path):
 # 完了処理：帳票書き込み + PDF出力 + PDFtk結合
 # ══════════════════════════════════════════════════════════
 
+# ── records/*.json 用 SQLite インデックス（全glob全読み対策）─────────────
+#   mtime+size が一致するファイルは本体を読まず DB キャッシュから返す。
+#   → OneDrive のオンデマンド同期（ファイル本体ダウンロード）を回避できる。
+#   DB は OneDrive 外（app.py と同階層の .vfap_cache/）に保管する。
+def _cases_index_db_path() -> Path:
+    cache_dir = Path(__file__).resolve().parent / ".vfap_cache"
+    try:
+        cache_dir.mkdir(exist_ok=True)
+    except Exception:
+        pass
+    return cache_dir / "cases_index.db"
+
+
+def _cases_index_connect():
+    con = sqlite3.connect(str(_cases_index_db_path()), timeout=5.0)
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS cases("
+        "path TEXT PRIMARY KEY, mtime REAL, size INTEGER, meisai_no TEXT, json TEXT)"
+    )
+    return con
+
+
+def _load_records_indexed(records_root: Path) -> dict:
+    """records/*.json を SQLite インデックス経由で読み、{meisai_no: record} を返す。
+    変更なしファイルは stat（mtime/size）だけ見て本体を読まない。"""
+    by_no = {}
+    fps = list(records_root.glob("*/*/*.json")) + list(records_root.glob("_unsorted/*.json"))
+    con = _cases_index_connect()
+    try:
+        cur = con.cursor()
+        cached = {row[0]: (row[1], row[2], row[3])
+                  for row in cur.execute("SELECT path, mtime, size, json FROM cases")}
+        seen = set()
+        upserts = []
+        for fp in fps:
+            sp = str(fp)
+            seen.add(sp)
+            try:
+                stt = fp.stat()
+                mt, sz = round(stt.st_mtime, 3), stt.st_size
+            except Exception:
+                continue
+            hit = cached.get(sp)
+            r = None
+            if hit and abs(hit[0] - mt) < 1e-6 and hit[1] == sz:
+                # 変更なし → ファイルを読まずキャッシュ利用
+                try:
+                    r = json.loads(hit[2])
+                except Exception:
+                    r = None
+            if r is None:
+                # 新規 / 変更 / キャッシュ破損 → 実ファイルを読んでインデックス更新
+                try:
+                    r = json.loads(fp.read_text(encoding="utf-8"))
+                except Exception:
+                    r = None
+                if r is not None:
+                    upserts.append((sp, mt, sz, str(r.get("meisai_no", "")),
+                                    json.dumps(r, ensure_ascii=False)))
+            if r is not None:
+                k = str(r.get("meisai_no", ""))
+                if k:
+                    by_no[k] = r
+        if upserts:
+            cur.executemany(
+                "INSERT INTO cases(path, mtime, size, meisai_no, json) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(path) DO UPDATE SET "
+                "mtime=excluded.mtime, size=excluded.size, "
+                "meisai_no=excluded.meisai_no, json=excluded.json", upserts)
+        stale = [p for p in cached if p not in seen]
+        if stale:
+            cur.executemany("DELETE FROM cases WHERE path=?", [(p,) for p in stale])
+        con.commit()
+    finally:
+        con.close()
+    return by_no
+
+
 def _load_all_cases(base_dir: Path) -> list:
     """② 読み込み統一：records/年/月/*.json（カード）を主、kakou_kiroku.json（ノート）を
     補完として全案件レコードを返す。meisai_no が重複したらカードを優先。"""
@@ -109,14 +192,20 @@ def _load_all_cases(base_dir: Path) -> list:
             pass
     records_root = base_dir / "records"
     if records_root.exists():
-        for fp in records_root.glob("*/*/*.json"):
-            try:
-                r = json.loads(fp.read_text(encoding="utf-8"))
-                k = str(r.get("meisai_no", ""))
-                if k:
-                    by_no[k] = r
-            except Exception:
-                pass
+        # 年/月/*.json（通常カード）＋ _unsorted/*.json（納品日不明のフォールバック）
+        try:
+            by_no.update(_load_records_indexed(records_root))
+        except Exception:
+            # インデックス失敗時は従来どおり全ファイル読み（安全フォールバック）
+            _fps = list(records_root.glob("*/*/*.json")) + list(records_root.glob("_unsorted/*.json"))
+            for fp in _fps:
+                try:
+                    r = json.loads(fp.read_text(encoding="utf-8"))
+                    k = str(r.get("meisai_no", ""))
+                    if k:
+                        by_no[k] = r
+                except Exception:
+                    pass
     return list(by_no.values())
 
 
