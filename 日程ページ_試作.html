@@ -1345,6 +1345,19 @@ let _kirokuWin = null;
 
 const _normNmP = s => String(s||'').normalize('NFKC').replace(/\s+/g,'');
 
+const SCHEDULE_BASE_YEAR = 2026; // 日程表の基準年（年明けの表に切り替えたらここを更新）
+// 納品日 mm/dd → yy/mm/dd。先頭日より月が戻っていたら翌年扱い（12→1の年またぎ対策）
+function adToYYMMDD(mmdd){
+  if(!mmdd) return '';
+  const parts = String(mmdd).split('/');
+  if(parts.length < 2) return '';
+  const m = parseInt(parts[0],10), d = parseInt(parts[1],10);
+  if(!m || !d) return '';
+  const baseM = parseInt(days[0][0].split('/')[0],10);
+  let y = SCHEDULE_BASE_YEAR;
+  if(m < baseM) y += 1;
+  return String(y).slice(-2) + '/' + String(m).padStart(2,'0') + '/' + String(d).padStart(2,'0');
+}
 function openKiroku(idx) {
   const r = rows[idx];
   const spec = (VFDB_SPEC && VFDB_SPEC[_normNmP(r.nm)]) || null;
@@ -1354,7 +1367,7 @@ function openKiroku(idx) {
   for(let pi = idx - 1; pi >= 0; pi--) {
     if(showHidden || !isAutoHide(rows[pi])) { prevNo = rows[pi].no; break; }
   }
-  const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: r.ad||'', idx: idx, prevNo};
+  const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: adToYYMMDD(r.ad), idx: idx, prevNo};
   const params = new URLSearchParams({
     meta: JSON.stringify(meta),
     spec: JSON.stringify(spec)
@@ -1747,15 +1760,8 @@ async function syncDoneFromKakou(rebuild=true){
 })();
 </script>
 
-<!-- 加工記録モーダル v2 -->
-<div id="kirokuModal" class="kiroku-overlay">
-  <div class="kiroku-pad2">
-    <div class="kr-head">
-      <span class="kr-title">加工記録</span>
-      <span class="kr-badge" id="k2-badge">—</span>
-      <span class="kr-nm" id="k2-nm-h">—</span>
-      <button class="kr-close" onclick="closeKiroku()">×</button>
-    </div>
-    <div class="kr-scroll">
-      <!-- サマリー行（日程表から自動取得 + 手入力） -->
-      <table class
+<!-- 加工記録モーダル v2（別窓方式へ移行済み・抜け殻を空要素として閉じる） -->
+<div id="kirokuModal" class="kiroku-overlay"></div>
+
+</body>
+</html>

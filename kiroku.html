@@ -346,8 +346,9 @@
           <h2 class="kr-zone-h">③ 納品後確認</h2>
           <div class="kr-zone-body">
             <div class="kr-z3-strip">
-              <div class="kr-fl"><div class="kr-fl-lbl">明細No</div><div class="kr-fl-box" id="k2-no">—</div></div>
-              <div class="kr-fl"><div class="kr-fl-lbl">入庫日</div><div class="kr-fl-box kr-fl-input"><input id="k2-nyuko-bi" type="text" placeholder="MM/DD"></div></div>
+              <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">明細No</div><div class="kr-fl-box" id="k2-no">—</div></div>
+              <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">入庫日</div><div class="kr-fl-box kr-fl-input"><input id="k2-nyuko-bi" type="text" placeholder="YY/MM/DD"></div></div>
+              <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">納品日</div><div class="kr-fl-box" id="k2-nohin-bi">—</div></div>
               <div class="kr-fl kr-fl-wide"><div class="kr-fl-lbl">品名</div><div class="kr-fl-box kr-fl-strong" id="k2-nm-v">—</div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">注文数</div><div class="kr-fl-box" id="k2-qty">—</div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">入庫数</div><div class="kr-fl-box kr-fl-av" id="k2-nyuko-su">0</div></div>
@@ -639,7 +640,7 @@ function _initFromData(r, spec, existing) {
   document.getElementById('k2-no').textContent    = noDisp;
   document.getElementById('k2-nm-v').textContent  = r.nm;
   document.getElementById('k2-qty').textContent   = r.qty;
-  { const adEl = document.getElementById('k2-ad'); if (adEl) adEl.textContent = r.ad || '—'; }
+  { const adEl = document.getElementById('k2-nohin-bi'); if (adEl) adEl.textContent = r.ad || '—'; }
   _fillKrSpec(spec);
   _fillKrForm(existing);
 }
