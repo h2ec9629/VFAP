@@ -94,38 +94,13 @@ def _get_or_open_wb(excel, path: Path):
 # 完了処理：帳票書き込み + PDF出力 + PDFtk結合
 # ══════════════════════════════════════════════════════════
 
-def _load_all_cases(base_dir: Path) -> list:
-    """② 読み込み統一：records/年/月/*.json（カード）を主、kakou_kiroku.json（ノート）を
-    補完として全案件レコードを返す。meisai_no が重複したらカードを優先。"""
-    by_no = {}
-    note = base_dir / "kakou_kiroku.json"
-    if note.exists():
-        try:
-            for r in json.loads(note.read_text(encoding="utf-8")):
-                k = str(r.get("meisai_no", ""))
-                if k:
-                    by_no[k] = r
-        except Exception:
-            pass
-    records_root = base_dir / "records"
-    if records_root.exists():
-        # 年/月/*.json（通常カード）＋ _unsorted/*.json（納品日不明のフォールバック）
-        _fps = list(records_root.glob("*/*/*.json")) + list(records_root.glob("_unsorted/*.json"))
-        for fp in _fps:
-            try:
-                r = json.loads(fp.read_text(encoding="utf-8"))
-                k = str(r.get("meisai_no", ""))
-                if k:
-                    by_no[k] = r
-            except Exception:
-                pass
-    return list(by_no.values())
-
-
 def _load_kakou_dict() -> dict:
-    """meisai_no をキーに完了済み加工記録を読む（カード優先＋ノート補完）"""
+    """meisai_no をキーに kakou_kiroku.json（完了済み）を読む"""
+    p = BASE_DIR / "kakou_kiroku.json"
+    if not p.exists():
+        return {}
     try:
-        records = _load_all_cases(BASE_DIR)
+        records = json.loads(p.read_text(encoding="utf-8"))
         return {str(r.get("meisai_no", "")).lstrip("0"): r for r in records if r.get("kanryo")}
     except Exception:
         return {}
@@ -1264,38 +1239,6 @@ _start_save_server(BASE_DIR)
 _KAKOU_PORT = 8503
 _kakou_lock = threading.Lock()
 
-def _save_case_json(base_dir: Path, record: dict):
-    """① 段階移行：1案件1JSONを records/年/月/明細No.json にアトミック保存する。
-    納品日(yy/mm/dd)で年・月フォルダへ振り分け。納品月が変わったら旧ファイルを削除（引っ越し）。
-    既存の kakou_kiroku.json はそのまま残す（並行書き込み）。失敗してもノート保存には影響させない。"""
-    import re as _re_case
-    nb = str(record.get("nohin_bi") or "").strip()
-    m = _re_case.match(r"^(\d{2})/(\d{2})/(\d{2})$", nb)
-    if not m:
-        return  # 納品日が無い/不正ならスキップ
-    yy, mm, _dd = m.groups()
-    year = "20" + yy
-    mno = str(record.get("meisai_no") or "").strip()
-    if not mno:
-        return
-    records_root = base_dir / "records"
-    target_dir = records_root / year / mm
-    target = target_dir / (mno + ".json")
-    # 月引っ越し：同名ファイルが別の年/月にあれば削除（納品日変更対応）
-    if records_root.exists():
-        for old in records_root.glob("*/*/" + mno + ".json"):
-            try:
-                if old.resolve() != target.resolve():
-                    old.unlink()
-            except Exception:
-                pass
-    target_dir.mkdir(parents=True, exist_ok=True)
-    # アトミック保存：temp に書いてから os.replace で置換
-    tmp = target_dir / (mno + ".json.tmp")
-    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(str(tmp), str(target))
-
-
 class _KakouHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1324,11 +1267,11 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(str(_e).encode())
             return
+        kakou_path = self.__class__.base_dir / "kakou_kiroku.json"
         with _kakou_lock:
-            try:
-                data = json.dumps(_load_all_cases(self.__class__.base_dir),
-                                  ensure_ascii=False).encode("utf-8")
-            except Exception:
+            if kakou_path.exists():
+                data = kakou_path.read_bytes()
+            else:
                 data = b"[]"
         self.send_response(200); self._cors()
         self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -1387,11 +1330,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                                 _np.write_text(
                                     json.dumps(_nrows, ensure_ascii=False, indent=2),
                                     encoding="utf-8")
-                except Exception:
-                    pass
-                # ① 段階移行：1案件1JSONも書き出す（失敗してもノート保存には影響させない）
-                try:
-                    _save_case_json(self.__class__.base_dir, record)
                 except Exception:
                     pass
             self.send_response(200); self._cors()
@@ -2387,13 +2325,14 @@ if page_sel == "加工記録":
     if st.button("再読み込み", key="kakou_reload"):
         st.rerun()
 
+    kakou_path = BASE_DIR / "kakou_kiroku.json"
+    if not kakou_path.exists():
+        st.info("まだ加工記録がありません。日程ページの明細Noをタップして記録を追加してください。")
+        st.stop()
     try:
-        all_kakou = _load_all_cases(BASE_DIR)
+        all_kakou = json.loads(kakou_path.read_text(encoding="utf-8"))
     except Exception as e:
         st.error(f"加工記録の読み込みエラー: {e}")
-        st.stop()
-    if not all_kakou:
-        st.info("まだ加工記録がありません。日程ページの明細Noをタップして記録を追加してください。")
         st.stop()
     # 「完了」ボタンが押された記録のみ履歴に表示する（下書き状態は対象外）
     all_kakou = [r for r in all_kakou if r.get("kanryo") is True]

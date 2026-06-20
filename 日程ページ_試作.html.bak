@@ -111,8 +111,6 @@
   #parallel-ctx-menu .ctx-sep{border-top:1px solid #333;margin:4px 0;}
   #parallel-ctx-menu .ctx-clear{padding:6px 12px;cursor:pointer;color:#e07060;}
   #parallel-ctx-menu .ctx-clear:hover{background:#2a2a2a;}
-  #parallel-ctx-menu .ctx-bunno{padding:6px 12px;cursor:pointer;color:#5ab0e0;font-weight:600;}
-  #parallel-ctx-menu .ctx-bunno:hover{background:#15293a;}
   /* 納品マーカーと進捗バーが重なっている＝納品遅延の恐れ → ほんのり赤くハイライト */
   tr.row.deliv-risk td.left{background:#3b2626 !important;}
   tr.row.deliv-risk td.cell{background:rgba(210,59,59,0.10);}
@@ -278,7 +276,6 @@
   /* 明細Noリンク */
   .fld.no.kiroku-trigger{cursor:pointer;color:var(--proc1);}
   .fld.no.kiroku-trigger:hover{text-decoration:underline;filter:brightness(1.2);}
-  .fld.no.no-bunno{font-size:11px;white-space:nowrap;letter-spacing:-.3px;}
   /* スピナー非表示 */
   .kiroku-overlay input[type=number]::-webkit-inner-spin-button,
   .kiroku-overlay input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
@@ -605,7 +602,7 @@ function buildBody(){
         const shohi_disp=is8FL?shohi:0;
         return `<span class="fld shohi">${shohi_disp}</span><span class="fld zansu">${zansu}</span>`;
       })()}
-      <span class="fld no kiroku-trigger${String(r.no).includes('-')?' no-bunno':''}" onclick="openKiroku(${idx});event.stopPropagation();">${String(r.no).replace(/^0+/,'')}</span>
+      <span class="fld no kiroku-trigger" onclick="openKiroku(${idx});event.stopPropagation();">${String(r.no).replace(/^0+/,'')}</span>
       <span class="fld nm${r.nm&&r.nm.includes('PC IN')?' nm-pcin':''}"><span class="nmtxt">${r.nm}</span></span>
       <span class="fld qty${qtyMod?' mod-qty':''}" data-edit="qty" data-idx="${idx}" tabindex="0">${r.qty}<span class="phour">${(()=>{
         // 残工数(h) = (注文数 - 進捗数) ÷ DB切断工数(本/h)
@@ -1348,19 +1345,6 @@ let _kirokuWin = null;
 
 const _normNmP = s => String(s||'').normalize('NFKC').replace(/\s+/g,'');
 
-const SCHEDULE_BASE_YEAR = 2026; // 日程表の基準年（年明けの表に切り替えたらここを更新）
-// 納品日 mm/dd → yy/mm/dd。先頭日より月が戻っていたら翌年扱い（12→1の年またぎ対策）
-function adToYYMMDD(mmdd){
-  if(!mmdd) return '';
-  const parts = String(mmdd).split('/');
-  if(parts.length < 2) return '';
-  const m = parseInt(parts[0],10), d = parseInt(parts[1],10);
-  if(!m || !d) return '';
-  const baseM = parseInt(days[0][0].split('/')[0],10);
-  let y = SCHEDULE_BASE_YEAR;
-  if(m < baseM) y += 1;
-  return String(y).slice(-2) + '/' + String(m).padStart(2,'0') + '/' + String(d).padStart(2,'0');
-}
 function openKiroku(idx) {
   const r = rows[idx];
   const spec = (VFDB_SPEC && VFDB_SPEC[_normNmP(r.nm)]) || null;
@@ -1370,7 +1354,7 @@ function openKiroku(idx) {
   for(let pi = idx - 1; pi >= 0; pi--) {
     if(showHidden || !isAutoHide(rows[pi])) { prevNo = rows[pi].no; break; }
   }
-  const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: adToYYMMDD(r.ad), idx: idx, prevNo};
+  const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: r.ad||'', idx: idx, prevNo};
   const params = new URLSearchParams({
     meta: JSON.stringify(meta),
     spec: JSON.stringify(spec)
@@ -1625,11 +1609,6 @@ function showParallelMenu(x,y,idx){
   const left=x+160>vw?Math.max(0,vw-164):x;
   const top=y+280>vh?Math.max(0,vh-284):y;
   menu.style.left=left+'px';menu.style.top=top+'px';
-  // ── 分納（最上段）──
-  const bn=document.createElement('div');bn.className='ctx-bunno';bn.textContent='⑂ 分納（納品を分ける）';
-  bn.addEventListener('click',()=>{ doBunno(idx); closeParallelMenu(); });
-  menu.appendChild(bn);
-  const bsep=document.createElement('div');bsep.className='ctx-sep';menu.appendChild(bsep);
   const title=document.createElement('div');
   title.className='ctx-title';title.textContent='並行開始日を設定';
   menu.appendChild(title);
@@ -1661,25 +1640,6 @@ function showParallelMenu(x,y,idx){
 }
 function closeParallelMenu(){
   if(_ctxMenu){_ctxMenu.remove();_ctxMenu=null;}
-}
-
-// ── 分納：元行を「明細No-1」にリネームし、直下に「-2」(次番)のコピーを挿入 ──
-// 枝番ありが分納のしるし。納品日/数量はユーザーが各行を後から編集する想定。
-function doBunno(idx){
-  const r=rows[idx];
-  const base=String(r.no).replace(/-\d+$/,'');          // 枝番を除いた元No
-  const esc=base.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); // 正規表現用エスケープ
-  const re=new RegExp('^'+esc+'-(\\d+)$');
-  if(!/-\d+$/.test(String(r.no))){ r.no=base+'-1'; }    // 初回分納→元を-1化
-  let maxN=0;                                            // 既存の最大枝番
-  rows.forEach(x=>{const m=String(x.no).match(re);if(m)maxN=Math.max(maxN,+m[1]);});
-  const copy=JSON.parse(JSON.stringify(r));
-  copy.no=base+'-'+(maxN+1);                             // 次の枝番
-  copy.done=0;                                           // 新しい納品分は未加工
-  if(copy.parallelFrom) delete copy.parallelFrom;
-  rows.splice(idx+1,0,copy);                             // 元行の直下に挿入
-  buildBody();markDirty();
-  toast('分納: '+r.no+' / '+copy.no+' に分割しました');
 }
 
 // キーボードナビゲーション + Esc
@@ -1787,8 +1747,15 @@ async function syncDoneFromKakou(rebuild=true){
 })();
 </script>
 
-<!-- 加工記録モーダル v2（別窓方式へ移行済み・抜け殻を空要素として閉じる） -->
-<div id="kirokuModal" class="kiroku-overlay"></div>
-
-</body>
-</html>
+<!-- 加工記録モーダル v2 -->
+<div id="kirokuModal" class="kiroku-overlay">
+  <div class="kiroku-pad2">
+    <div class="kr-head">
+      <span class="kr-title">加工記録</span>
+      <span class="kr-badge" id="k2-badge">—</span>
+      <span class="kr-nm" id="k2-nm-h">—</span>
+      <button class="kr-close" onclick="closeKiroku()">×</button>
+    </div>
+    <div class="kr-scroll">
+      <!-- サマリー行（日程表から自動取得 + 手入力） -->
+      <table class
