@@ -1089,7 +1089,11 @@ function _buildRecord() {
   const iv = id => parseInt(document.getElementById(id)?.value||'0',10)||0;
   const sv = id => document.getElementById(id)?.value?.trim()||'';
   return {
+    schema_version: 1,
     meisai_no: String(r.no), hinmei: r.nm, qty: r.qty, grp: r.grp||'',
+    nohin_bi: r.ad||'',
+    konpo_hako: sv('k2-konpo-hako'),
+    konpo_su: parseInt((document.getElementById('k2-konpo-su')?.textContent||'').replace(/[^0-9]/g,'')||'0',10)||0,
     kakou_lot: lots[0]?.lot||'', hako_su: lots[0]?.hako||0, lots,
     nyuko_bi: sv('k2-nyuko-bi'), nyuko_su: parseInt(document.getElementById('k2-nyuko-su')?.textContent||'0',10)||0,
     kizai_furyou: iv('k2-kizai-f'), daily,

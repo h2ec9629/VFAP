@@ -1239,6 +1239,38 @@ _start_save_server(BASE_DIR)
 _KAKOU_PORT = 8503
 _kakou_lock = threading.Lock()
 
+def _save_case_json(base_dir: Path, record: dict):
+    """① 段階移行：1案件1JSONを records/年/月/明細No.json にアトミック保存する。
+    納品日(yy/mm/dd)で年・月フォルダへ振り分け。納品月が変わったら旧ファイルを削除（引っ越し）。
+    既存の kakou_kiroku.json はそのまま残す（並行書き込み）。失敗してもノート保存には影響させない。"""
+    import re as _re_case
+    nb = str(record.get("nohin_bi") or "").strip()
+    m = _re_case.match(r"^(\d{2})/(\d{2})/(\d{2})$", nb)
+    if not m:
+        return  # 納品日が無い/不正ならスキップ
+    yy, mm, _dd = m.groups()
+    year = "20" + yy
+    mno = str(record.get("meisai_no") or "").strip()
+    if not mno:
+        return
+    records_root = base_dir / "records"
+    target_dir = records_root / year / mm
+    target = target_dir / (mno + ".json")
+    # 月引っ越し：同名ファイルが別の年/月にあれば削除（納品日変更対応）
+    if records_root.exists():
+        for old in records_root.glob("*/*/" + mno + ".json"):
+            try:
+                if old.resolve() != target.resolve():
+                    old.unlink()
+            except Exception:
+                pass
+    target_dir.mkdir(parents=True, exist_ok=True)
+    # アトミック保存：temp に書いてから os.replace で置換
+    tmp = target_dir / (mno + ".json.tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(str(tmp), str(target))
+
+
 class _KakouHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1330,6 +1362,11 @@ class _KakouHandler(BaseHTTPRequestHandler):
                                 _np.write_text(
                                     json.dumps(_nrows, ensure_ascii=False, indent=2),
                                     encoding="utf-8")
+                except Exception:
+                    pass
+                # ① 段階移行：1案件1JSONも書き出す（失敗してもノート保存には影響させない）
+                try:
+                    _save_case_json(self.__class__.base_dir, record)
                 except Exception:
                     pass
             self.send_response(200); self._cors()
