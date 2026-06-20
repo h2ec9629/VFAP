@@ -111,6 +111,8 @@
   #parallel-ctx-menu .ctx-sep{border-top:1px solid #333;margin:4px 0;}
   #parallel-ctx-menu .ctx-clear{padding:6px 12px;cursor:pointer;color:#e07060;}
   #parallel-ctx-menu .ctx-clear:hover{background:#2a2a2a;}
+  #parallel-ctx-menu .ctx-bunno{padding:6px 12px;cursor:pointer;color:#5ab0e0;font-weight:600;}
+  #parallel-ctx-menu .ctx-bunno:hover{background:#15293a;}
   /* 納品マーカーと進捗バーが重なっている＝納品遅延の恐れ → ほんのり赤くハイライト */
   tr.row.deliv-risk td.left{background:#3b2626 !important;}
   tr.row.deliv-risk td.cell{background:rgba(210,59,59,0.10);}
@@ -1648,11 +1650,35 @@ function showParallelMenu(x,y,idx){
     });
     menu.appendChild(clr);
   }
+  // ── 分納（納品を複数回に分ける）──
+  const bsep=document.createElement('div');bsep.className='ctx-sep';menu.appendChild(bsep);
+  const bn=document.createElement('div');bn.className='ctx-bunno';bn.textContent='⑂ 分納（納品を分ける）';
+  bn.addEventListener('click',()=>{ doBunno(idx); closeParallelMenu(); });
+  menu.appendChild(bn);
   document.body.appendChild(menu);_ctxMenu=menu;
   setTimeout(()=>document.addEventListener('click',closeParallelMenu,{once:true}),0);
 }
 function closeParallelMenu(){
   if(_ctxMenu){_ctxMenu.remove();_ctxMenu=null;}
+}
+
+// ── 分納：元行を「明細No-1」にリネームし、直下に「-2」(次番)のコピーを挿入 ──
+// 枝番ありが分納のしるし。納品日/数量はユーザーが各行を後から編集する想定。
+function doBunno(idx){
+  const r=rows[idx];
+  const base=String(r.no).replace(/-\d+$/,'');          // 枝番を除いた元No
+  const esc=base.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); // 正規表現用エスケープ
+  const re=new RegExp('^'+esc+'-(\\d+)$');
+  if(!/-\d+$/.test(String(r.no))){ r.no=base+'-1'; }    // 初回分納→元を-1化
+  let maxN=0;                                            // 既存の最大枝番
+  rows.forEach(x=>{const m=String(x.no).match(re);if(m)maxN=Math.max(maxN,+m[1]);});
+  const copy=JSON.parse(JSON.stringify(r));
+  copy.no=base+'-'+(maxN+1);                             // 次の枝番
+  copy.done=0;                                           // 新しい納品分は未加工
+  if(copy.parallelFrom) delete copy.parallelFrom;
+  rows.splice(idx+1,0,copy);                             // 元行の直下に挿入
+  buildBody();markDirty();
+  toast('分納: '+r.no+' / '+copy.no+' に分割しました');
 }
 
 // キーボードナビゲーション + Esc
