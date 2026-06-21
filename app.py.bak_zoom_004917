@@ -2977,26 +2977,13 @@ if page_sel == "帳票保管庫":
                 st.rerun()
         _src = "http://localhost:8503/serve_pdf?p=" + _ulib.quote(str(_vp))
         _viewer_html = """
-<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;color:#ccc;font-size:12px;">
-  <button id="zoomout" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">−</button>
-  <span id="zoomlbl">70%</span>
-  <button id="zoomin" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">＋</button>
-  <button id="zoomfit" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">幅に合わせる</button>
-  <span id="pdfmsg" style="color:#aaa;margin-left:8px;">読み込み中…</span>
-</div>
-<div id="pdfwrap" style="width:100%;max-height:760px;overflow:auto;background:#1a1a1a;padding:6px;border-radius:6px;text-align:center;"></div>
+<div id="pdfwrap" style="width:100%;max-height:800px;overflow:auto;background:#1a1a1a;padding:6px;border-radius:6px;"></div>
+<div id="pdfmsg" style="color:#aaa;font-size:12px;padding:6px;">読み込み中…</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 (function(){
-  var SRC = "__SRC__"; var zoom = 0.7;
+  var SRC = "__SRC__";
   function fail(m){ var e=document.getElementById('pdfmsg'); if(e) e.textContent='表示できませんでした: '+m+'（「開く」かDLで確認してな）'; }
-  function applyZoom(){
-    document.querySelectorAll('#pdfwrap canvas').forEach(function(c){ c.style.width=(zoom*100)+'%'; });
-    var l=document.getElementById('zoomlbl'); if(l) l.textContent=Math.round(zoom*100)+'%';
-  }
-  document.getElementById('zoomin').onclick=function(){ zoom=Math.min(2.0,zoom+0.1); applyZoom(); };
-  document.getElementById('zoomout').onclick=function(){ zoom=Math.max(0.3,zoom-0.1); applyZoom(); };
-  document.getElementById('zoomfit').onclick=function(){ zoom=1.0; applyZoom(); };
   if(!window['pdfjsLib']){ fail('pdf.js読込失敗（オフライン？）'); return; }
   pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   fetch(SRC).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
@@ -3006,20 +2993,19 @@ if page_sel == "帳票保管庫":
        var wrap=document.getElementById('pdfwrap'); var chain=Promise.resolve();
        for(var i=1;i<=pdf.numPages;i++){ (function(n){
          chain=chain.then(function(){ return pdf.getPage(n).then(function(page){
-           var vp=page.getViewport({scale:2.0});
+           var vp=page.getViewport({scale:1.4});
            var c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
-           c.style.cssText='display:inline-block;width:'+(zoom*100)+'%;margin:0 auto 8px;background:#fff;border:1px solid #333;border-radius:4px;';
+           c.style.cssText='display:block;width:100%;margin:0 auto 8px;background:#fff;border:1px solid #333;border-radius:4px;';
            wrap.appendChild(c);
            return page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
          });});
        })(i); }
-       return chain.then(applyZoom);
+       return chain;
     })
     .catch(function(e){ fail(e.message||String(e)); });
 })();
 </script>
 """.replace("__SRC__", _src)
-        _viewer_comp.html(_viewer_html, height=880, scrolling=True)
         _viewer_comp.html(_viewer_html, height=860, scrolling=True)
         st.markdown("---")
 

@@ -1271,10 +1271,9 @@ _CHOHYO_INJECT_HAISO = r"""
 (function(){
   function add(){
     if(document.getElementById('btn-save-chohyo')) return;
-    document.querySelectorAll('.btn-pdf').forEach(function(x){ if(x.id!=='btn-save-chohyo') x.remove(); });
     var bar=document.querySelector('.ctrl')||document.body; if(!bar) return;
     var b=document.createElement('button');
-    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🖨 PDF出力';
+    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🗄 保管庫に保存';
     b.onclick=function(){
       var ws=document.getElementById('week-start'); var d=ws?ws.value:'';
       if(!d){alert('週が表示されてません');return;}
@@ -1304,10 +1303,9 @@ _CHOHYO_INJECT_SEIKYUU = r"""
 (function(){
   function add(){
     if(document.getElementById('btn-save-chohyo')) return;
-    document.querySelectorAll('.btn-pdf').forEach(function(x){ if(x.id!=='btn-save-chohyo') x.remove(); });
     var bar=document.querySelector('header')||document.body; if(!bar) return;
     var b=document.createElement('button');
-    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🖨 PDF出力';
+    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🗄 保管庫に保存';
     b.onclick=function(){
       var mh=document.querySelector('.month-header'); var txt=mh?mh.textContent:'';
       var ym=txt.match(/(\d{4})/); var year=ym?ym[1]:String(new Date().getFullYear());
@@ -1539,32 +1537,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
-        if self.path.split("?")[0] == "/chohyo_ping":
-            self.send_response(200); self._cors()
-            self.send_header("Content-Type", "application/json"); self.end_headers()
-            self.wfile.write(b'{"ok":true,"ver":"chohyo1"}')
-            return
-        if self.path.split("?")[0] == "/serve_pdf":
-            try:
-                from urllib.parse import urlparse as _up, parse_qs as _pq, unquote as _uq
-                _qp = _pq(_up(self.path).query)
-                _pp = _uq(_qp.get("p", [""])[0])
-                _target = Path(_pp).resolve()
-                _root   = CHOHYO_ROOT.resolve()
-                _okpath = str(_target).startswith(str(_root)) and _target.suffix.lower() == ".pdf" and _target.exists()
-                if not _okpath:
-                    self.send_response(404); self._cors(); self.end_headers(); return
-                _pdfb = _target.read_bytes()
-                self.send_response(200); self._cors()
-                self.send_header("Content-Type", "application/pdf")
-                self.send_header("Content-Length", str(len(_pdfb)))
-                self.send_header("Content-Disposition", "inline; filename=report.pdf")
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                self.wfile.write(_pdfb)
-            except Exception:
-                self.send_response(500); self._cors(); self.end_headers()
-            return
         if self.path.split("?")[0] == "/ui":
             # app.py と同じフォルダの kiroku.html を使う（BASE_DIR とは独立）
             ui_path = Path(__file__).resolve().parent / "kiroku.html"
@@ -2963,82 +2935,18 @@ if page_sel == "帳票保管庫":
         st.info("PDFが見つかりませんわ。")
         st.stop()
 
-    # ── アプリ内PDFビューア（選択中を上部にプレビュー）──
-    _vp = st.session_state.get("chohyo_view_pdf")
-    if _vp and Path(_vp).exists():
-        import urllib.parse as _ulib
-        import streamlit.components.v1 as _viewer_comp
-        _vc1, _vc2 = st.columns([8, 2])
-        with _vc1:
-            st.markdown(f"**📖 プレビュー:** {Path(_vp).name}")
-        with _vc2:
-            if st.button("✕ 閉じる", key="ar_view_close", use_container_width=True):
-                st.session_state.pop("chohyo_view_pdf", None)
-                st.rerun()
-        _src = "http://localhost:8503/serve_pdf?p=" + _ulib.quote(str(_vp))
-        _viewer_html = """
-<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;color:#ccc;font-size:12px;">
-  <button id="zoomout" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">−</button>
-  <span id="zoomlbl">70%</span>
-  <button id="zoomin" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">＋</button>
-  <button id="zoomfit" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">幅に合わせる</button>
-  <span id="pdfmsg" style="color:#aaa;margin-left:8px;">読み込み中…</span>
-</div>
-<div id="pdfwrap" style="width:100%;max-height:760px;overflow:auto;background:#1a1a1a;padding:6px;border-radius:6px;text-align:center;"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-(function(){
-  var SRC = "__SRC__"; var zoom = 0.7;
-  function fail(m){ var e=document.getElementById('pdfmsg'); if(e) e.textContent='表示できませんでした: '+m+'（「開く」かDLで確認してな）'; }
-  function applyZoom(){
-    document.querySelectorAll('#pdfwrap canvas').forEach(function(c){ c.style.width=(zoom*100)+'%'; });
-    var l=document.getElementById('zoomlbl'); if(l) l.textContent=Math.round(zoom*100)+'%';
-  }
-  document.getElementById('zoomin').onclick=function(){ zoom=Math.min(2.0,zoom+0.1); applyZoom(); };
-  document.getElementById('zoomout').onclick=function(){ zoom=Math.max(0.3,zoom-0.1); applyZoom(); };
-  document.getElementById('zoomfit').onclick=function(){ zoom=1.0; applyZoom(); };
-  if(!window['pdfjsLib']){ fail('pdf.js読込失敗（オフライン？）'); return; }
-  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  fetch(SRC).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
-    .then(function(buf){ return pdfjsLib.getDocument({data:buf}).promise; })
-    .then(function(pdf){
-       document.getElementById('pdfmsg').textContent = pdf.numPages+'ページ';
-       var wrap=document.getElementById('pdfwrap'); var chain=Promise.resolve();
-       for(var i=1;i<=pdf.numPages;i++){ (function(n){
-         chain=chain.then(function(){ return pdf.getPage(n).then(function(page){
-           var vp=page.getViewport({scale:2.0});
-           var c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
-           c.style.cssText='display:inline-block;width:'+(zoom*100)+'%;margin:0 auto 8px;background:#fff;border:1px solid #333;border-radius:4px;';
-           wrap.appendChild(c);
-           return page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
-         });});
-       })(i); }
-       return chain.then(applyZoom);
-    })
-    .catch(function(e){ fail(e.message||String(e)); });
-})();
-</script>
-""".replace("__SRC__", _src)
-        _viewer_comp.html(_viewer_html, height=880, scrolling=True)
-        _viewer_comp.html(_viewer_html, height=860, scrolling=True)
-        st.markdown("---")
-
     st.caption(f"{len(_pdfs)} 件")
     for _i, _pdf in enumerate(_pdfs):
-        _c1, _c2, _c3, _c4 = st.columns([6, 2, 2, 2])
+        _c1, _c2, _c3 = st.columns([6, 2, 2])
         with _c1:
             st.write(f"📄 {_pdf.name}")
         with _c2:
-            if st.button("👁 表示", key=f"ar_view_{_i}", use_container_width=True):
-                st.session_state["chohyo_view_pdf"] = str(_pdf)
-                st.rerun()
-        with _c3:
             if st.button("開く", key=f"ar_open_{_i}", use_container_width=True):
                 try:
                     os.startfile(str(_pdf))
                 except Exception as _e:
                     st.error(f"開けませんでした: {_e}")
-        with _c4:
+        with _c3:
             with open(_pdf, "rb") as _f:
                 st.download_button("DL", data=_f, file_name=_pdf.name,
                                    mime="application/pdf",
