@@ -1264,6 +1264,88 @@ CHOHYO_DIRS = {
 }
 CHOHYO_BY_YEAR_ONLY = {"請求明細書"}
 
+# ══════════════════════════════
+# 残4: 日次zipバックアップ ＋ PC別JSONLログ
+# ══════════════════════════════
+BACKUP_ROOT      = BASE_DIR / "_backup"   # 年-月/YYYYMMDD.zip
+LOG_ROOT         = BASE_DIR / "_logs"     # PC名.jsonl
+BACKUP_KEEP_DAYS = 30                      # 世代保持日数
+
+def _pc_name() -> str:
+    """端末名を返す（ログのPC別振り分け用）。"""
+    try:
+        n = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME")
+        if n:
+            return n
+        import socket
+        return socket.gethostname()
+    except Exception:
+        return "unknown"
+
+def _safe_name(s: str) -> str:
+    return "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(s))[:40] or "unknown"
+
+def _jsonl_log(action: str, detail=None):
+    """主要操作イベントを PC別 JSONL に1行追記。失敗しても本処理に影響させない。"""
+    try:
+        LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        pc = _pc_name()
+        rec = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "pc": pc,
+            "action": action,
+            "detail": detail,
+        }
+        with open(LOG_ROOT / (_safe_name(pc) + ".jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+def _daily_backup():
+    """1日1回、業務データ(records/*.json + 設定json)をzipで _backup へ退避。
+    既に当日分が在れば何もしない。保持日数より古いzipは自動削除。失敗は握りつぶす。"""
+    try:
+        import zipfile
+        now = datetime.now()
+        ym  = now.strftime("%Y-%m")
+        day = now.strftime("%Y%m%d")
+        dest_dir = BACKUP_ROOT / ym
+        dest = dest_dir / (day + ".zip")
+        if dest.exists():
+            return  # 今日はもう取得済み
+        targets = []
+        rec_root = BASE_DIR / "records"
+        if rec_root.exists():
+            targets.extend(sorted(rec_root.rglob("*.json")))
+        for name in ["nittei.json", "sgt_status.json", "iraisho_seen.json",
+                     "iraisho_deleted.json", "vfdb.json"]:
+            p = BASE_DIR / name
+            if p.exists():
+                targets.append(p)
+        if not targets:
+            return
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(".zip.tmp")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+            for p in targets:
+                try:
+                    z.write(p, arcname=str(p.relative_to(BASE_DIR)))
+                except Exception:
+                    pass
+        os.replace(str(tmp), str(dest))   # アトミック確定（中途半端zip防止）
+        _jsonl_log("daily_backup", {"file": dest.name, "files": len(targets)})
+        # 世代管理：保持日数より古い *.zip を削除
+        cutoff = now - timedelta(days=BACKUP_KEEP_DAYS)
+        for zf in BACKUP_ROOT.rglob("*.zip"):
+            try:
+                if datetime.strptime(zf.stem, "%Y%m%d") < cutoff:
+                    zf.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 # ── iframe内に差し込む「保管庫に保存」ボタン（表示中の週/月をそのままPDF化）──
 #   表示中DOMから<script>を除去した静止HTMLを 8503 サーバへ送る → Edgeでrender
 _CHOHYO_INJECT_HAISO = r"""
@@ -1611,6 +1693,8 @@ class _KakouHandler(BaseHTTPRequestHandler):
                     _odir = _odir / _month
                 _outp = _odir / _fname
                 _ok, _msg = _html_to_pdf_edge(_html, _outp, landscape=_land)
+                if _ok:
+                    _jsonl_log("chohyo_pdf", {"kind": _kind, "file": _fname})
                 self.send_response(200 if _ok else 500); self._cors()
                 self.send_header("Content-Type", "application/json"); self.end_headers()
                 self.wfile.write(json.dumps(
@@ -1646,6 +1730,7 @@ class _KakouHandler(BaseHTTPRequestHandler):
                     all_records.append(record)
                 kakou_path.write_text(
                     json.dumps(all_records, ensure_ascii=False, indent=2), encoding="utf-8")
+                _jsonl_log("kakou_save", {"meisai_no": record.get("meisai_no")})
                 # 加工記録の保存時のみ、日程の進捗(done)に入庫数(nyuko_su)を反映する
                 try:
                     _np = self.__class__.base_dir / "nittei.json"
@@ -1699,6 +1784,15 @@ def _start_kakou_server(base_dir: Path):
         pass  # 既に起動済み
 
 _start_kakou_server(BASE_DIR)
+
+# 残4: 起動時に1日1回バックアップ＋起動ログ（セッション単位で1度だけ）
+try:
+    if not st.session_state.get("_r4_boot_done"):
+        st.session_state["_r4_boot_done"] = True
+        _daily_backup()
+        _jsonl_log("app_open", {"ver": "r4"})
+except Exception:
+    pass
 
 
 # ══════════════════════════════════════════════════════════
@@ -3455,6 +3549,7 @@ if act_complete:
         st.warning("チェックの付いた案件がありません。")
     else:
         kakou_dict = _load_kakou_dict()
+        _jsonl_log("complete", {"count": len(checked)})
         _up_r = os.environ.get("USERPROFILE", "")
         _vfdb_candidates = [
             BASE_DIR / "vfdb.json",
