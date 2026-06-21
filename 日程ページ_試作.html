@@ -667,19 +667,19 @@ function buildBody(){
     // 進捗バーと納品日カラムの位置判定
     //   ・納品日を追い越す      → 納品遅延の恐れ（赤）
     //   ・納品日当日に食い込むだけ → 当日まで作業（黄色）
-    if(!pct100){ dbgUnfin++; if(sAd!=null) dbgSad++; }
-    if(!pct100 && sAd!=null){
-      const pxPerH=CW/HRS_PER_SLOT;
-      const barLeft=(startH+BAR_OFFSET)*pxPerH+1;
-      const barRight=barLeft+Math.max(remaining*pxPerH-2,4);
-      const dayLeft=sAd*CW;      // 納品日カラムの左端
-      const dayRight=sAd*CW+CW;  // 納品日カラムの右端
-      if(barRight>dayRight){
-        // バー右端が納品日を追い越す → 遅延の恐れ（赤）
+    if(!pct100){ dbgUnfin++; }
+    // 納品日の営業日index（daysは営業日のみ）。バー終端は画面同様 BAR_OFFSET(シミュ)込み
+    const _di=days.findIndex(d=>d[0]===r.ad);
+    if(!pct100 && _di>=0){
+      dbgSad++;
+      const HPD=HRS_PER_SLOT*2;        // 1営業日の工数(8h)
+      const visEndH=endH+BAR_OFFSET;   // 画面上のバー終端
+      if(visEndH >= (_di+1)*HPD){
+        // 納品日を過ぎて終わる → 納品遅延の恐れ（赤）
         tr.classList.add('deliv-risk');
         delivRiskCount++;
-      }else if(barRight>dayLeft){
-        // バー右端が納品日当日に食い込む（当日まで作業）→ 黄色
+      }else if(visEndH >= (_di-1)*HPD){
+        // 前営業日〜納品日当日に終わる（余裕少）→ 黄色
         tr.classList.add('samedaywork-risk');
         sameDayCount++;
       }
