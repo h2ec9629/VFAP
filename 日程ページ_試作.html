@@ -557,7 +557,8 @@ function buildBody(){
   const tb=document.getElementById('body');tb.innerHTML="";
   const BAR_OFFSET=getSimOffset(); // バー表示位置（シミュトグル連動）
   let cumH=0; // 累計工数は常に0から（表示される「累X.Xh」の基準）
-  let delivRiskCount=0; // 納品マーカーと進捗バーが重なっている件数
+  let delivRiskCount=0; // 納品日を追い越す件数（遅延の恐れ・赤）
+  let sameDayCount=0;   // 納品日当日に食い込む件数（当日まで作業・黄）
   let prevZansu=null; // 8FL281304行の残数累積
   rows.forEach((r,idx)=>{
     if(!showHidden && isAutoHide(r)) return;  // 自動非表示
@@ -661,18 +662,23 @@ function buildBody(){
       addMark(r.af,"due",1); // 期限も午後列に統一
     } // 引取・納品=午後(PM), 期限=午前
 
-    // 納品マーカーと進捗バーの重なり判定（＝納品遅延の恐れ）
+    // 進捗バーと納品日カラムの位置判定
+    //   ・納品日を追い越す      → 納品遅延の恐れ（赤）
+    //   ・納品日当日に食い込むだけ → 当日まで作業（黄色）
     if(!pct100 && sAd!=null){
       const pxPerH=CW/HRS_PER_SLOT;
       const barLeft=(startH+BAR_OFFSET)*pxPerH+1;
       const barRight=barLeft+Math.max(remaining*pxPerH-2,4);
-      const markLeft=sAd*CW+1;
-      const markWidth=(sAd===sAf)?Math.floor((CW-2)/2):(CW-2);
-      const markRight=markLeft+markWidth;
-      if(barLeft<markRight && markLeft<barRight){
+      const dayLeft=sAd*CW;      // 納品日カラムの左端
+      const dayRight=sAd*CW+CW;  // 納品日カラムの右端
+      if(barRight>dayRight){
+        // バー右端が納品日を追い越す → 遅延の恐れ（赤）
         tr.classList.add('deliv-risk');
-        tr.classList.add('samedaywork-risk');
         delivRiskCount++;
+      }else if(barRight>dayLeft){
+        // バー右端が納品日当日に食い込む（当日まで作業）→ 黄色
+        tr.classList.add('samedaywork-risk');
+        sameDayCount++;
       }
     }
 
@@ -699,8 +705,8 @@ function buildBody(){
   }
   const sameDayEl=document.getElementById('samedaywork-warn');
   if(sameDayEl){
-    if(delivRiskCount>0){
-      sameDayEl.textContent='⚠ 納品日当日まで作業が続く依頼があります。';
+    if(sameDayCount>0){
+      sameDayEl.textContent='⚠ 納品日当日まで作業が続く依頼が'+sameDayCount+'件あります。';
       sameDayEl.style.display='';
     } else {
       sameDayEl.textContent='';
