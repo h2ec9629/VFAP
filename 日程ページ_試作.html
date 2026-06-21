@@ -375,7 +375,6 @@
   <h1>6月度 切断加工日程表</h1>
   <span class="sub" id="deliv-warn" style="display:none;color:var(--due);font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
   <span class="sub" id="samedaywork-warn" style="display:none;color:#f0c040;font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
-  <span class="sub" id="warn-debug" style="color:#888;font-size:12px;"></span>
   <div class="btns">
     <button id="sort-due-btn" onclick="sortPicksByDue()" style="display:none;background:#2e9e5b;color:#fff;border-color:#2e9e5b;">⇅ 期限でソート</button>
     <button onclick="autoAssignDenno()" style="background:#5a3800;color:#c88040;border-color:#c88040;" title="納品日グループごとに伝票Noを自動採番（未採番のみ）">採番</button>
@@ -560,7 +559,6 @@ function buildBody(){
   let cumH=0; // 累計工数は常に0から（表示される「累X.Xh」の基準）
   let delivRiskCount=0; // 納品日を追い越す件数（遅延の恐れ・赤）
   let sameDayCount=0;   // 納品日当日に食い込む件数（当日まで作業・黄）
-  let dbgUnfin=0, dbgSad=0; // [DEBUG] 未完件数 / 納品日が目盛り内の件数
   let prevZansu=null; // 8FL281304行の残数累積
   rows.forEach((r,idx)=>{
     if(!showHidden && isAutoHide(r)) return;  // 自動非表示
@@ -667,11 +665,9 @@ function buildBody(){
     // 進捗バーと納品日カラムの位置判定
     //   ・納品日を追い越す      → 納品遅延の恐れ（赤）
     //   ・納品日当日に食い込むだけ → 当日まで作業（黄色）
-    if(!pct100){ dbgUnfin++; }
     // 納品日の営業日index（daysは営業日のみ）。バー終端は画面同様 BAR_OFFSET(シミュ)込み
     const _di=days.findIndex(d=>d[0]===r.ad);
     if(!pct100 && _di>=0){
-      dbgSad++;
       const HPD=HRS_PER_SLOT*2;        // 1営業日の工数(8h)
       const visEndH=endH+BAR_OFFSET;   // 画面上のバー終端
       if(visEndH >= (_di+1)*HPD){
@@ -716,8 +712,6 @@ function buildBody(){
       sameDayEl.style.display='none';
     }
   }
-  const dbgEl=document.getElementById('warn-debug');
-  if(dbgEl){ dbgEl.textContent='[DEBUG] 未完:'+dbgUnfin+' / 納品日が目盛り内:'+dbgSad+' / 当日まで:'+sameDayCount+' / 超過:'+delivRiskCount; }
 }
 
 function attachColHover(){
