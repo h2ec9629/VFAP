@@ -1178,15 +1178,16 @@ def detect_base_dir() -> Path:
 
     _od_work = detect_onedrive_work()
     if _od_work:
-        # nittei.json の置き場を SGT_cloud に固定（自動探索のドリフト防止）。
-        # SGT_cloud フォルダが在れば nittei.json の有無に関わらず必ずここを採用する。
-        _sgt_cloud = _od_work / "SGT_cloud"
-        try:
-            if _sgt_cloud.exists():
-                return _sgt_cloud
-        except Exception:
-            pass
-        candidates.append(_sgt_cloud)
+        # データフォルダを固定（自動探索のドリフト防止）。
+        # 新名 VFAP-cloud を優先、旧名 SGT_cloud もフォールバックで受ける（改名移行用）。
+        for _cloud_name in ("VFAP-cloud", "SGT_cloud"):
+            _cloud = _od_work / _cloud_name
+            try:
+                if _cloud.exists():
+                    return _cloud
+            except Exception:
+                pass
+            candidates.append(_cloud)
         candidates.append(_od_work / "VFAP")
         candidates.append(_od_work / "sgt2605_cloud_bundle")
         candidates.append(_od_work)
@@ -1228,6 +1229,7 @@ def detect_jushi_dir(base: Path) -> Path:
 
     _od_work2 = detect_onedrive_work()
     if _od_work2:
+        candidates.append(_od_work2 / "VFAP-cloud" / "input" / "樹脂指示書")
         candidates.append(_od_work2 / "SGT_cloud" / "input" / "樹脂指示書")
         candidates.append(_od_work2 / "input" / "樹脂指示書")
 
