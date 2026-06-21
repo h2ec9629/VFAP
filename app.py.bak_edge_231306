@@ -1264,143 +1264,6 @@ CHOHYO_DIRS = {
 }
 CHOHYO_BY_YEAR_ONLY = {"請求明細書"}
 
-# ── iframe内に差し込む「保管庫に保存」ボタン（表示中の週/月をそのままPDF化）──
-#   表示中DOMから<script>を除去した静止HTMLを 8503 サーバへ送る → Edgeでrender
-_CHOHYO_INJECT_HAISO = r"""
-<script>
-(function(){
-  function add(){
-    if(document.getElementById('btn-save-chohyo')) return;
-    document.querySelectorAll('.btn-pdf').forEach(function(x){ if(x.id!=='btn-save-chohyo') x.remove(); });
-    var bar=document.querySelector('.ctrl')||document.body; if(!bar) return;
-    var b=document.createElement('button');
-    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🖨 PDF出力';
-    b.onclick=function(){
-      var ws=document.getElementById('week-start'); var d=ws?ws.value:'';
-      if(!d){alert('週が表示されてません');return;}
-      var dt=new Date(d+'T00:00:00'); var mon=new Date(dt);
-      mon.setDate(mon.getDate()-((mon.getDay()+6)%7));
-      var y=mon.getFullYear(), m=('0'+(mon.getMonth()+1)).slice(-2), dd=('0'+mon.getDate()).slice(-2);
-      var clone=document.documentElement.cloneNode(true);
-      clone.querySelectorAll('script').forEach(function(s){s.remove();});
-      var old=b.textContent; b.disabled=true; b.textContent='保存中…';
-      fetch('http://localhost:8503/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({kind:'配送日程表',year:String(y),month:m,landscape:true,
-          filename:y+m+dd+'_配送日程表.pdf',html:clone.outerHTML})})
-        .then(function(r){return r.json();})
-        .then(function(j){b.textContent=j.ok?'✓ 保管しました':'✗ '+(j.msg||'失敗');})
-        .catch(function(){b.textContent='✗ 通信失敗';})
-        .then(function(){setTimeout(function(){b.textContent=old;b.disabled=false;},2600);});
-    };
-    bar.appendChild(b);
-  }
-  document.addEventListener('DOMContentLoaded',add); setTimeout(add,800);
-})();
-</script>
-"""
-
-_CHOHYO_INJECT_SEIKYUU = r"""
-<script>
-(function(){
-  function add(){
-    if(document.getElementById('btn-save-chohyo')) return;
-    document.querySelectorAll('.btn-pdf').forEach(function(x){ if(x.id!=='btn-save-chohyo') x.remove(); });
-    var bar=document.querySelector('header')||document.body; if(!bar) return;
-    var b=document.createElement('button');
-    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🖨 PDF出力';
-    b.onclick=function(){
-      var mh=document.querySelector('.month-header'); var txt=mh?mh.textContent:'';
-      var ym=txt.match(/(\d{4})/); var year=ym?ym[1]:String(new Date().getFullYear());
-      var mons=(txt.match(/(\d+)月/g)||[]).map(function(s){return ('0'+parseInt(s,10)).slice(-2);});
-      if(mons.length===0){mons=[('0'+(new Date().getMonth()+1)).slice(-2)];}
-      var label=year+'-'+mons.join('_');
-      var clone=document.documentElement.cloneNode(true);
-      clone.querySelectorAll('script').forEach(function(s){s.remove();});
-      var old=b.textContent; b.disabled=true; b.textContent='保存中…';
-      fetch('http://localhost:8503/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({kind:'請求明細書',year:year,landscape:false,
-          filename:label+'_請求明細書.pdf',html:clone.outerHTML})})
-        .then(function(r){return r.json();})
-        .then(function(j){b.textContent=j.ok?'✓ 保管しました':'✗ '+(j.msg||'失敗');})
-        .catch(function(){b.textContent='✗ 通信失敗';})
-        .then(function(){setTimeout(function(){b.textContent=old;b.disabled=false;},2600);});
-    };
-    bar.appendChild(b);
-  }
-  document.addEventListener('DOMContentLoaded',add); setTimeout(add,1000);
-})();
-</script>
-"""
-
-
-# ── HTML → PDF（Edge/Chrome の画面なしモードで生成。window.print と同じ見た目）──
-def _find_edge_or_chrome():
-    """msedge.exe / chrome.exe を探す（Windows標準のEdge優先）"""
-    _cands = [
-        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
-        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
-    ]
-    for _c in _cands:
-        try:
-            if _c.exists():
-                return str(_c)
-        except Exception:
-            pass
-    for _n in ("msedge", "chrome", "google-chrome", "chromium"):
-        _w = shutil.which(_n)
-        if _w:
-            return _w
-    return None
-
-
-def _html_to_pdf_edge(html_text: str, out_pdf: Path, landscape: bool = False) -> tuple:
-    """populate済みHTML文字列を Edge/Chrome 画面なしモードでPDF化し out_pdf に保存。
-    A4・余白を @page で固定。戻り値 (ok, msg)。"""
-    _exe = _find_edge_or_chrome()
-    if not _exe:
-        return False, "Edge/Chrome が見つかりません（PDF化の謎の力が使えません）"
-    import tempfile as _tf, uuid as _uuid
-    _tmpdir = Path(_tf.gettempdir()) / "vfap_pdf"
-    try:
-        _tmpdir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    _page_css = ("<style>@page{size:A4 %s;margin:6mm;} "
-                 "html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}</style>"
-                 ) % ("landscape" if landscape else "portrait")
-    if "</head>" in html_text:
-        html_text = html_text.replace("</head>", _page_css + "</head>", 1)
-    else:
-        html_text = _page_css + html_text
-    _tmp_html = _tmpdir / ("_render_" + _uuid.uuid4().hex[:8] + ".html")
-    _tmp_html.write_text(html_text, encoding="utf-8")
-    _user_dir = _tmpdir / ("ud_" + _uuid.uuid4().hex[:8])
-    try:
-        out_pdf.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    try:
-        _r = subprocess.run(
-            [_exe, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
-             "--user-data-dir=" + str(_user_dir),
-             "--virtual-time-budget=10000",
-             "--print-to-pdf=" + str(out_pdf), _tmp_html.as_uri()],
-            capture_output=True, text=True, timeout=120,
-            encoding="cp932", errors="replace",
-        )
-        if not out_pdf.exists():
-            return False, "PDF生成失敗: " + (_r.stderr or "")[:300]
-        return True, str(out_pdf)
-    except Exception as _e:
-        return False, str(_e)
-    finally:
-        try:
-            _tmp_html.unlink(missing_ok=True)
-        except Exception:
-            pass
-
 # ══════════════════════════════════════════════════════════
 # nittei.json 保存サーバー（バックグラウンドスレッド port:8502）
 # ══════════════════════════════════════════════════════════
@@ -1539,32 +1402,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
-        if self.path.split("?")[0] == "/chohyo_ping":
-            self.send_response(200); self._cors()
-            self.send_header("Content-Type", "application/json"); self.end_headers()
-            self.wfile.write(b'{"ok":true,"ver":"chohyo1"}')
-            return
-        if self.path.split("?")[0] == "/serve_pdf":
-            try:
-                from urllib.parse import urlparse as _up, parse_qs as _pq, unquote as _uq
-                _qp = _pq(_up(self.path).query)
-                _pp = _uq(_qp.get("p", [""])[0])
-                _target = Path(_pp).resolve()
-                _root   = CHOHYO_ROOT.resolve()
-                _okpath = str(_target).startswith(str(_root)) and _target.suffix.lower() == ".pdf" and _target.exists()
-                if not _okpath:
-                    self.send_response(404); self._cors(); self.end_headers(); return
-                _pdfb = _target.read_bytes()
-                self.send_response(200); self._cors()
-                self.send_header("Content-Type", "application/pdf")
-                self.send_header("Content-Length", str(len(_pdfb)))
-                self.send_header("Content-Disposition", "inline; filename=report.pdf")
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                self.wfile.write(_pdfb)
-            except Exception:
-                self.send_response(500); self._cors(); self.end_headers()
-            return
         if self.path.split("?")[0] == "/ui":
             # app.py と同じフォルダの kiroku.html を使う（BASE_DIR とは独立）
             ui_path = Path(__file__).resolve().parent / "kiroku.html"
@@ -1593,35 +1430,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(data)
     def do_POST(self):
-        # ── 帳票保管庫：表示中HTMLを受け取りEdgeでPDF化して保管 ──
-        if self.path.split("?")[0] == "/save_chohyo":
-            try:
-                _len = int(self.headers.get("Content-Length", 0))
-                _pl  = json.loads(self.rfile.read(_len))
-                _kind  = _pl.get("kind", "")
-                _html  = _pl.get("html", "")
-                _land  = bool(_pl.get("landscape"))
-                _fname = _pl.get("filename") or "report.pdf"
-                _year  = str(_pl.get("year") or "")
-                _month = str(_pl.get("month") or "")
-                if _kind not in CHOHYO_DIRS or not _html:
-                    raise ValueError("bad request")
-                _odir = CHOHYO_DIRS[_kind] / _year
-                if _month:
-                    _odir = _odir / _month
-                _outp = _odir / _fname
-                _ok, _msg = _html_to_pdf_edge(_html, _outp, landscape=_land)
-                self.send_response(200 if _ok else 500); self._cors()
-                self.send_header("Content-Type", "application/json"); self.end_headers()
-                self.wfile.write(json.dumps(
-                    {"ok": _ok, "msg": _msg, "path": str(_outp)},
-                    ensure_ascii=False).encode("utf-8"))
-            except Exception as _e:
-                self.send_response(500); self._cors()
-                self.send_header("Content-Type", "application/json"); self.end_headers()
-                self.wfile.write(json.dumps(
-                    {"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8"))
-            return
         try:
             length = int(self.headers.get("Content-Length", 0))
             record = json.loads(self.rfile.read(length))
@@ -2831,7 +2639,6 @@ if page_sel == "請求":
     if not _seikyuu_nittei:
         st.info("日程データがありません。SGT.xlsm を確認してください。")
     else:
-        _html_src = _html_src.replace("</body>", _CHOHYO_INJECT_SEIKYUU + "</body>", 1)
         _scomp.html(_html_src, height=_iframe_h, scrolling=True)
 
     st.stop()
@@ -2912,8 +2719,6 @@ if page_sel == "配送":
         "const VFDB_LIST = [];",
         "const VFDB_LIST = " + _json_h.dumps(_vfdb_list_h, ensure_ascii=False) + ";"
     )
-    # ── iframe内に「保管庫に保存」ボタンを注入（表示中の週をそのままPDF化）──
-    _haiso_html = _haiso_html.replace("</body>", _CHOHYO_INJECT_HAISO + "</body>", 1)
     _kcomp_h.html(_haiso_html, height=900, scrolling=True)
     st.stop()
 
@@ -2963,82 +2768,18 @@ if page_sel == "帳票保管庫":
         st.info("PDFが見つかりませんわ。")
         st.stop()
 
-    # ── アプリ内PDFビューア（選択中を上部にプレビュー）──
-    _vp = st.session_state.get("chohyo_view_pdf")
-    if _vp and Path(_vp).exists():
-        import urllib.parse as _ulib
-        import streamlit.components.v1 as _viewer_comp
-        _vc1, _vc2 = st.columns([8, 2])
-        with _vc1:
-            st.markdown(f"**📖 プレビュー:** {Path(_vp).name}")
-        with _vc2:
-            if st.button("✕ 閉じる", key="ar_view_close", use_container_width=True):
-                st.session_state.pop("chohyo_view_pdf", None)
-                st.rerun()
-        _src = "http://localhost:8503/serve_pdf?p=" + _ulib.quote(str(_vp))
-        _viewer_html = """
-<div style="display:flex;align-items:center;gap:8px;padding:4px 6px;color:#ccc;font-size:12px;">
-  <button id="zoomout" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">−</button>
-  <span id="zoomlbl">70%</span>
-  <button id="zoomin" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">＋</button>
-  <button id="zoomfit" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">幅に合わせる</button>
-  <span id="pdfmsg" style="color:#aaa;margin-left:8px;">読み込み中…</span>
-</div>
-<div id="pdfwrap" style="width:100%;max-height:760px;overflow:auto;background:#1a1a1a;padding:6px;border-radius:6px;text-align:center;"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-(function(){
-  var SRC = "__SRC__"; var zoom = 0.7;
-  function fail(m){ var e=document.getElementById('pdfmsg'); if(e) e.textContent='表示できませんでした: '+m+'（「開く」かDLで確認してな）'; }
-  function applyZoom(){
-    document.querySelectorAll('#pdfwrap canvas').forEach(function(c){ c.style.width=(zoom*100)+'%'; });
-    var l=document.getElementById('zoomlbl'); if(l) l.textContent=Math.round(zoom*100)+'%';
-  }
-  document.getElementById('zoomin').onclick=function(){ zoom=Math.min(2.0,zoom+0.1); applyZoom(); };
-  document.getElementById('zoomout').onclick=function(){ zoom=Math.max(0.3,zoom-0.1); applyZoom(); };
-  document.getElementById('zoomfit').onclick=function(){ zoom=1.0; applyZoom(); };
-  if(!window['pdfjsLib']){ fail('pdf.js読込失敗（オフライン？）'); return; }
-  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  fetch(SRC).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
-    .then(function(buf){ return pdfjsLib.getDocument({data:buf}).promise; })
-    .then(function(pdf){
-       document.getElementById('pdfmsg').textContent = pdf.numPages+'ページ';
-       var wrap=document.getElementById('pdfwrap'); var chain=Promise.resolve();
-       for(var i=1;i<=pdf.numPages;i++){ (function(n){
-         chain=chain.then(function(){ return pdf.getPage(n).then(function(page){
-           var vp=page.getViewport({scale:2.0});
-           var c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
-           c.style.cssText='display:inline-block;width:'+(zoom*100)+'%;margin:0 auto 8px;background:#fff;border:1px solid #333;border-radius:4px;';
-           wrap.appendChild(c);
-           return page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
-         });});
-       })(i); }
-       return chain.then(applyZoom);
-    })
-    .catch(function(e){ fail(e.message||String(e)); });
-})();
-</script>
-""".replace("__SRC__", _src)
-        _viewer_comp.html(_viewer_html, height=880, scrolling=True)
-        _viewer_comp.html(_viewer_html, height=860, scrolling=True)
-        st.markdown("---")
-
     st.caption(f"{len(_pdfs)} 件")
     for _i, _pdf in enumerate(_pdfs):
-        _c1, _c2, _c3, _c4 = st.columns([6, 2, 2, 2])
+        _c1, _c2, _c3 = st.columns([6, 2, 2])
         with _c1:
             st.write(f"📄 {_pdf.name}")
         with _c2:
-            if st.button("👁 表示", key=f"ar_view_{_i}", use_container_width=True):
-                st.session_state["chohyo_view_pdf"] = str(_pdf)
-                st.rerun()
-        with _c3:
             if st.button("開く", key=f"ar_open_{_i}", use_container_width=True):
                 try:
                     os.startfile(str(_pdf))
                 except Exception as _e:
                     st.error(f"開けませんでした: {_e}")
-        with _c4:
+        with _c3:
             with open(_pdf, "rb") as _f:
                 st.download_button("DL", data=_f, file_name=_pdf.name,
                                    mime="application/pdf",
