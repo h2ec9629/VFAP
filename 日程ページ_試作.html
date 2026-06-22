@@ -572,6 +572,10 @@ function buildBody(){
     let startH, endH;
     if(r.parallelFrom){
       const _pi=days.findIndex(d=>d[0]===r.parallelFrom);
+      // 開始日を手動変更した行(parallelFrom)は、その開始位置に固定表示する。
+      // -BAR_OFFSET は描画時の +BAR_OFFSET を打ち消すための仕掛け。
+      // これにより +4h/+8h シミュを切ってもこの行だけは動かない（＝固定）。
+      // ★この -BAR_OFFSET は消さないこと（消すと固定行がシミュで動いてしまう）
       startH=(_pi>=0)?(_pi*8-BAR_OFFSET):cumH;
       endH=startH+remaining;
       cumH=endH; // 速めた行の終わりから後続を直列で積み直す（アンカー＆再連結）
@@ -662,20 +666,22 @@ function buildBody(){
       addMark(r.af,"due",1); // 期限も午後列に統一
     } // 引取・納品=午後(PM), 期限=午前
 
-    // 進捗バーと納品日カラムの位置判定
-    //   ・納品日を追い越す      → 納品遅延の恐れ（赤）
-    //   ・納品日当日に食い込むだけ → 当日まで作業（黄色）
+    // 進捗バーが納品日カラムに差し掛かったら警告
+    //   ・納品日の午前枠に差し掛かる → 当日まで作業（黄）
+    //   ・納品日の午後枠に差し掛かる → 納品遅延の恐れ（赤）。赤が優先
     // 納品日の営業日index（daysは営業日のみ）。バー終端は画面同様 BAR_OFFSET(シミュ)込み
     const _di=days.findIndex(d=>d[0]===r.ad);
     if(!pct100 && _di>=0){
-      const HPD=HRS_PER_SLOT*2;        // 1営業日の工数(8h)
-      const visEndH=endH+BAR_OFFSET;   // 画面上のバー終端
-      if(visEndH >= (_di+1)*HPD){
-        // 納品日を過ぎて終わる → 納品遅延の恐れ（赤）
+      const HPD=HRS_PER_SLOT*2;             // 1営業日の工数(8h)
+      const visEndH=endH+BAR_OFFSET;        // 画面上のバー終端
+      const amStart=_di*HPD;                // 納品日 午前枠の始まり
+      const pmStart=_di*HPD+HRS_PER_SLOT;   // 納品日 午後枠の始まり
+      if(visEndH > pmStart){
+        // 納品日の午後枠に差し掛かる → 納品遅延の恐れ（赤）
         tr.classList.add('deliv-risk');
         delivRiskCount++;
-      }else if(visEndH >= (_di-1)*HPD){
-        // 前営業日〜納品日当日に終わる（余裕少）→ 黄色
+      }else if(visEndH > amStart){
+        // 納品日の午前枠に差し掛かる → 当日まで作業（黄）
         tr.classList.add('samedaywork-risk');
         sameDayCount++;
       }
