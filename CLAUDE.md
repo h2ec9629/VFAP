@@ -15,61 +15,65 @@ VFAP/
 
 ## Git ワークフロー（必須）
 
-- **セッション開始時**: 必ず `git pull` を実行すること（「git pullしましたか？」と確認する）
-- **ファイル編集後**: 必ず以下をセットで実行すること
+### セッション開始時に自動実行すること
+
+Claudeはセッション開始時、ユーザーからの指示を待たずに以下を自動実行する：
 
 ```bash
+# ① PATを読み込む
+PAT=$(cat /sessions/.../mnt/dev/VFAP/token/VFAPtoken.txt)
+
+# ② sandbox内にclone（GitHubから最新版を取得）
+git clone https://h2ec9629:${PAT}@github.com/h2ec9629/VFAP.git /tmp/VFAP-sandbox
+
+# ③ cloneした最新版をmounted filesystemに反映（コードファイルのみ）
+rsync -av --exclude='.git' --exclude='input/' --exclude='output/' --exclude='token/' \
+  /tmp/VFAP-sandbox/ /sessions/.../mnt/dev/VFAP/
+```
+
+- PATは `token/VFAPtoken.txt` から読み込む
+- ③のrsyncで他端末の変更がローカルに反映される
+- 完了後「GitHub最新版を取得しましたわ！push準備OKです」と一言伝える
+
+### ファイル編集後のpush手順
+
+Claudeがファイルを編集したあと、push指示があれば以下を実行する：
+
+```bash
+# 編集ファイルをsandboxにコピーしてpush
+cp /sessions/.../mnt/dev/VFAP/<編集ファイル> /tmp/VFAP-sandbox/
+cd /tmp/VFAP-sandbox
 git add .
 git commit -m "変更内容を一言で"
 git push
 ```
 
-- リモート: `https://github.com/h2ec9629/VFAP.git`（branch: main）
+- リモート: `https://github.com/h2ec9629/VFAP.git`（branch: master）
+- virtiofs（fuse）マウント上では git が動かないため、必ずsandbox内のcloneを経由すること
+
+### 循環構造まとめ
+
+```
+GitHub
+  ↓ clone → rsync（セッション開始時・自動）
+mounted filesystem（Claude編集）
+  ↓ cp → git push（編集後・push指示で実行）
+GitHub
+```
+
+3端末どれから作業しても、セッション開始時に必ずGitHubの最新版を取得してから作業開始する。
 
 ## 開発環境
 
-- **作業フォルダ（主軸）**: `C:\Users\<user>\Desktop\dev\VFAP`
+- **作業フォルダ（主軸）**: `C:\Users\mmtm9\Desktop\dev\VFAP`
+- **bashパス**: `/sessions/.../mnt/dev/VFAP/`
 - **GitHub**: `https://github.com/h2ec9629/VFAP`
-- **OneDrive**: バックアップ置き場（`C:\Users\<user>\OneDrive\work\VFAP`）
+- **PAT保存場所**: `token/VFAPtoken.txt`
+- **OneDrive**: バックアップ置き場（`C:\Users\mmtm9\OneDrive\work\VFAP`）
   - DB・xlsm・json等のデータファイルはOneDriveにのみ存在する（Git管理外）
   - コード編集はdev側で完結し、OneDriveには同期しない
 
 ## ⚠️ 編集対象ファイルの原則
 
-**編集は必ず `C:\Users\user\Desktop\dev\VFAP` 側のファイルで行うこと。**
-OneDrive (`C:\Users\user\OneDrive\work\VFAP`) はレガシー兼バックアップであり、編集対象外。
-
-## ファイル編集ルール
-
-ローカル開発のため OneDrive 同期問題は発生しないが、
-**Edit ツール使用後は必ず末尾チェックを行うこと**（Edit ツール自体が途中で切れるケースあり）。
-
-```bash
-python3 -c "
-with open('対象ファイルのbashパス', encoding='utf-8') as f: c = f.read()
-print('size:', len(c))
-print(repr(c[-80:]))
-"
-```
-
-- bashパス例: `/sessions/.../mnt/dev/VFAP/app.py`
-- 末尾が正常な終端なら OK
-- 切れていたら Python の `append` モードで補完する
-
-## app.py 編集ルール
-
-末尾切れ防止のため、大きな変更は Edit ツールより Python スクリプト（src.replace）での一括編集を推奨。
-
-手順：
-1. Read でファイル内容取得
-2. replace で差分を適用
-3. 末尾チェック
-4. git commit & push
-
-## HTMLのレイアウト・サイズ調整時の注意（全ページ共通）
-
-サイズ変更が反映されない場合、キャッシュより先に**グローバル強制スタイルの競合**を疑うこと。
-
-- `grep` で `!important|min-height:[0-9]|height:[0-9]` を検索して洗い出す
-- セレクタは必ずクラス名で絞る（グローバルセレクタ乱用禁止）
-- `display:flex` を `<td>`/`<th>` 直に当てない（セル内 `<div>` に付けること）
+**編集は必ず `C:\Users\mmtm9\Desktop\dev\VFAP` 側のファイルで行うこと。**
+OneDrive (`C:\Users\mmtm9\OneDrive\work\VFAP`
