@@ -1,0 +1,3968 @@
+"""
+SGT管理システム v1.1（会社PC対応版）
+依頼書保管モジュール
+
+v1.0 からの変更点：
+  - パスをユーザー名非依存に自動判定（mmtm9 固定をやめた）
+  - SGT.xlsm がExcelで開きっぱなしでも落ちないよう、一時コピー経由で読む
+  - 樹脂指示書フォルダ等が無くてもエラーで止まらず、警告表示で続行
+  - サイドバーで実際に使われているパスを表示（トラブル時の確認用）
+"""
+
+import streamlit as st
+import pandas as pd
+import openpyxl
+from pathlib import Path
+import json
+import sqlite3
+import math
+import os
+import shutil
+import subprocess
+import tempfile
+import threading
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
+from datetime import datetime, timedelta
+
+# ──────────────────────────────────────────────────────────
+def find_excel_exe() -> str | None:
+    """このPCのExcel.exeを探す。見つからなければNone。"""
+    candidates = [
+        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE",
+        r"C:\Program Files\Microsoft Office\Office16\EXCEL.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\Office16\EXCEL.EXE",
+    ]
+    for c in candidates:
+        if Path(c).exists():
+            return c
+    # レジストリ既定から探す（App Paths）
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe",
+        )
+        val, _ = winreg.QueryValueEx(key, None)
+        if val and Path(val).exists():
+            return val
+    except Exception:
+        pass
+    return None
+
+# 起動時に1回だけ探してキャッシュ
+EXCEL_EXE = find_excel_exe()
+
+def open_in_excel(file_path: str) -> tuple:
+    """
+    ファイルをデスクトップ版Excelで直接開く。(成功bool, メッセージ) を返す。
+    os.startfile だと OneDrive/既定アプリの謎の力でブラウザ版が開くことが
+    あるため、Excel.exe を名指しで起動する。見つからなければ os.startfile に戻す。
+    """
+    p = Path(file_path)
+    if not file_path or not p.exists():
+        return False, "ファイルが見つかりませんでした"
+    try:
+        if EXCEL_EXE:
+            subprocess.Popen([EXCEL_EXE, str(p.resolve())])
+        else:
+            os.startfile(str(p.resolve()))  # Excelが見つからない場合の保険
+        return True, p.name
+    except Exception as e:
+        return False, str(e)
+
+# ──────────────────────────────────────────────────────────
+def _get_or_open_excel():
+    """既存 Excel に接続、なければ新規起動。(excel, is_new) を返す"""
+    import win32com.client
+    try:
+        return win32com.client.GetActiveObject("Excel.Application"), False
+    except Exception:
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        return excel, True
+
+def _get_or_open_wb(excel, path: Path):
+    """Workbooks の中から path を探し、なければ Open する"""
+    name = path.name.lower()
+    for i in range(1, excel.Workbooks.Count + 1):
+        if excel.Workbooks(i).Name.lower() == name:
+            return excel.Workbooks(i)
+    return excel.Workbooks.Open(str(path.resolve()))
+
+
+# ══════════════════════════════════════════════════════════
+# 完了処理：帳票書き込み + PDF出力 + PDFtk結合
+# ══════════════════════════════════════════════════════════
+
+# ── records/*.json 用 SQLite インデックス（全glob全読み対策）─────────────
+#   mtime+size が一致するファイルは本体を読まず DB キャッシュから返す。
+#   → OneDrive のオンデマンド同期（ファイル本体ダウンロード）を回避できる。
+#   DB は OneDrive 外（app.py と同階層の .vfap_cache/）に保管する。
+def _cases_index_db_path() -> Path:
+    cache_dir = Path(__file__).resolve().parent / ".vfap_cache"
+    try:
+        cache_dir.mkdir(exist_ok=True)
+    except Exception:
+        pass
+    return cache_dir / "cases_index.db"
+
+
+def _cases_index_connect():
+    con = sqlite3.connect(str(_cases_index_db_path()), timeout=5.0)
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS cases("
+        "path TEXT PRIMARY KEY, mtime REAL, size INTEGER, meisai_no TEXT, json TEXT)"
+    )
+    return con
+
+
+def _load_records_indexed(records_root: Path) -> dict:
+    """records/*.json を SQLite インデックス経由で読み、{meisai_no: record} を返す。
+    変更なしファイルは stat（mtime/size）だけ見て本体を読まない。"""
+    by_no = {}
+    fps = list(records_root.glob("*/*/*.json")) + list(records_root.glob("_unsorted/*.json"))
+    con = _cases_index_connect()
+    try:
+        cur = con.cursor()
+        cached = {row[0]: (row[1], row[2], row[3])
+                  for row in cur.execute("SELECT path, mtime, size, json FROM cases")}
+        seen = set()
+        upserts = []
+        for fp in fps:
+            sp = str(fp)
+            seen.add(sp)
+            try:
+                stt = fp.stat()
+                mt, sz = round(stt.st_mtime, 3), stt.st_size
+            except Exception:
+                continue
+            hit = cached.get(sp)
+            r = None
+            if hit and abs(hit[0] - mt) < 1e-6 and hit[1] == sz:
+                # 変更なし → ファイルを読まずキャッシュ利用
+                try:
+                    r = json.loads(hit[2])
+                except Exception:
+                    r = None
+            if r is None:
+                # 新規 / 変更 / キャッシュ破損 → 実ファイルを読んでインデックス更新
+                try:
+                    r = json.loads(fp.read_text(encoding="utf-8"))
+                except Exception:
+                    r = None
+                if r is not None:
+                    upserts.append((sp, mt, sz, str(r.get("meisai_no", "")),
+                                    json.dumps(r, ensure_ascii=False)))
+            if r is not None:
+                k = str(r.get("meisai_no", ""))
+                if k:
+                    by_no[k] = r
+        if upserts:
+            cur.executemany(
+                "INSERT INTO cases(path, mtime, size, meisai_no, json) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(path) DO UPDATE SET "
+                "mtime=excluded.mtime, size=excluded.size, "
+                "meisai_no=excluded.meisai_no, json=excluded.json", upserts)
+        stale = [p for p in cached if p not in seen]
+        if stale:
+            cur.executemany("DELETE FROM cases WHERE path=?", [(p,) for p in stale])
+        con.commit()
+    finally:
+        con.close()
+    return by_no
+
+
+def _load_all_cases(base_dir: Path) -> list:
+    """② 読み込み統一：records/年/月/*.json（カード）を主、kakou_kiroku.json（ノート）を
+    補完として全案件レコードを返す。meisai_no が重複したらカードを優先。"""
+    by_no = {}
+    note = base_dir / "kakou_kiroku.json"
+    if note.exists():
+        try:
+            for r in json.loads(note.read_text(encoding="utf-8")):
+                k = str(r.get("meisai_no", ""))
+                if k:
+                    by_no[k] = r
+        except Exception:
+            pass
+    records_root = base_dir / "records"
+    if records_root.exists():
+        # 年/月/*.json（通常カード）＋ _unsorted/*.json（納品日不明のフォールバック）
+        try:
+            by_no.update(_load_records_indexed(records_root))
+        except Exception:
+            # インデックス失敗時は従来どおり全ファイル読み（安全フォールバック）
+            _fps = list(records_root.glob("*/*/*.json")) + list(records_root.glob("_unsorted/*.json"))
+            for fp in _fps:
+                try:
+                    r = json.loads(fp.read_text(encoding="utf-8"))
+                    k = str(r.get("meisai_no", ""))
+                    if k:
+                        by_no[k] = r
+                except Exception:
+                    pass
+    return list(by_no.values())
+
+
+def _load_kakou_dict() -> dict:
+    """meisai_no をキーに完了済み加工記録を読む（カード優先＋ノート補完）"""
+    try:
+        records = _load_all_cases(BASE_DIR)
+        return {str(r.get("meisai_no", "")).lstrip("0"): r for r in records if r.get("kanryo")}
+    except Exception:
+        return {}
+
+
+
+def _load_nittei_dict() -> dict:
+    """no をキーに nittei.json を読む（denno・ad 取得用）"""
+    _cands = [BASE_DIR / "nittei.json", Path(__file__).resolve().parent / "nittei.json"]
+    _p = next((c for c in _cands if c.exists()), None)
+    if _p is None:
+        return {}
+    try:
+        _recs = json.loads(_p.read_text(encoding="utf-8"))
+        return {str(r.get("no", "")).lstrip("0"): r for r in _recs}
+    except Exception:
+        return {}
+
+
+
+def _auto_assign_denno_and_save() -> dict:
+    """denno未設定 & ad設定済みの行を自動採番して nittei.json に上書き保存し、no→row の dict を返す。"""
+    _cands = [BASE_DIR / "nittei.json", Path(__file__).resolve().parent / "nittei.json"]
+    _p = next((c for c in _cands if c.exists()), None)
+    if _p is None:
+        return {}
+    try:
+        _rows = json.loads(_p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    _unassigned = [r for r in _rows if not r.get("denno") and r.get("ad")]
+    if not _unassigned:
+        return {str(r.get("no", "")).lstrip("0"): r for r in _rows}
+
+    # 月ごとの既存 denno 最大連番
+    _month_max = {}
+    for _r in _rows:
+        if _r.get("denno") and _r.get("ad"):
+            try:
+                _m = int(_r["ad"].split("/")[0])
+                _prefix = f"{_m}-"
+                if _r["denno"].startswith(_prefix):
+                    _n = int(_r["denno"].split("-")[1])
+                    _month_max[_m] = max(_month_max.get(_m, 0), _n)
+            except (IndexError, ValueError):
+                pass
+
+    # 納品日ごとの既存 denno 使用数
+    _ad_denno_count = {}
+    for _r in _rows:
+        if _r.get("denno") and _r.get("ad"):
+            _ad_denno_count.setdefault(_r["ad"], {})
+            _ad_denno_count[_r["ad"]][_r["denno"]] = _ad_denno_count[_r["ad"]].get(_r["denno"], 0) + 1
+
+    # 未採番を納品日でグループ化 → 日付昇順
+    _groups = {}
+    for _r in _unassigned:
+        _groups.setdefault(_r["ad"], []).append(_r)
+    _sorted_dates = sorted(_groups.keys(), key=lambda d: tuple(int(x) for x in d.split("/")))
+
+    _changed = 0
+    for _date in _sorted_dates:
+        _m = int(_date.split("/")[0])
+        _prefix = f"{_m}-"
+        if _m not in _month_max:
+            _month_max[_m] = 0
+        _grp = _groups[_date]
+        _existing = _ad_denno_count.get(_date, {})
+        # 空きスロット（<7件）がある既存 denno を先に使う
+        _sorted_ex = sorted(
+            _existing.keys(),
+            key=lambda d: int(d.split("-")[1]) if "-" in d else 0
+        )
+        _cur_denno, _cur_count = None, 0
+        for _d in _sorted_ex:
+            if _existing[_d] < 7:
+                _cur_denno, _cur_count = _d, _existing[_d]
+                break
+        for _r in _grp:
+            if not _cur_denno or _cur_count >= 7:
+                _month_max[_m] += 1
+                _cur_denno = f"{_prefix}{_month_max[_m]}"
+                _cur_count = 0
+                _ad_denno_count.setdefault(_date, {})
+            _r["denno"] = _cur_denno
+            _ad_denno_count[_date][_cur_denno] = _ad_denno_count[_date].get(_cur_denno, 0) + 1
+            _cur_count += 1
+            _changed += 1
+
+    if _changed:
+        try:
+            _p.write_text(json.dumps(_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+            _pdf_debug_log(f"[採番] {_changed}件に伝票Noを自動採番してnittei.jsonを保存しました")
+        except Exception as _e:
+            _pdf_debug_log(f"[採番] nittei.json保存エラー: {_e}")
+
+    return {str(r.get("no", "")).lstrip("0"): r for r in _rows}
+
+def _make_meisaisho_pdf(ad_str: str, items: list, out_path) -> tuple:
+    """
+    納品明細書 PDF (A4横) - SGT Excel 納品明細書シートに準拠
+    """
+    try:
+        import os as _os
+        from reportlab.pdfgen import canvas as _rlc
+        from reportlab.lib.pagesizes import A4 as _A4, landscape as _landscape
+        from reportlab.pdfbase import pdfmetrics as _pm
+        from reportlab.pdfbase.ttfonts import TTFont as _TTF
+
+        # ── フォント（游ゴシック→メイリオ→MSゴシック の順で試行）──
+        _JA, _JA_B = "Helvetica", "Helvetica-Bold"
+        for _fp, _ni, _bi in [
+            (r"C:\Windows\Fonts\YuGothM.ttc",  0, 0),
+            (r"C:\Windows\Fonts\meiryo.ttc",   0, 1),
+            (r"C:\Windows\Fonts\msgothic.ttc", 0, 2),
+        ]:
+            if _os.path.exists(_fp):
+                try:
+                    _pm.registerFont(_TTF("_MSN_ms", _fp, subfontIndex=_ni))
+                    _JA = "_MSN_ms"
+                    try:
+                        _pm.registerFont(_TTF("_MSB_ms", _fp, subfontIndex=_bi))
+                        _JA_B = "_MSB_ms"
+                    except Exception:
+                        _JA_B = _JA
+                    break
+                except Exception:
+                    continue
+
+        # ── ページ・マージン ──
+        _W, _H = _landscape(_A4)   # 841.89 × 595.28 pt
+        _PT    = 2.83465
+        _ML    = 14 * _PT
+        _MR    = 14 * _PT
+        _MT    = 12 * _PT
+        _MB    = 10 * _PT
+        _TW    = _W - _ML - _MR
+
+        # ── 納品日表示 ──
+        try:
+            _ms, _ds = ad_str.split("/")
+            _yr = datetime.now().year
+            _date_disp = f"{_yr}年{int(_ms)}月{int(_ds)}日"
+        except Exception:
+            _date_disp = ad_str
+
+        # ── 伝票No集計 ──
+        _dn_rows = {}
+        for _it in items:
+            _dn = str(_it.get("denno") or "—")
+            _dn_rows.setdefault(_dn, []).append(_it["row_no"])
+        _denno_list = []
+        for _dn, _rns in sorted(_dn_rows.items(), key=lambda kv: kv[1][0]):
+            _dn_disp = _dn.replace("-", "ー") if _dn != "—" else _dn
+            _denno_list.append((f"番号　{min(_rns)}～{max(_rns)}", _dn_disp))
+
+        _c = _rlc.Canvas(str(out_path), pagesize=(_W, _H))
+
+        # ──────────────────────────────────────
+        # ヘッダー（Excel rows 2-4 相当）
+        # ──────────────────────────────────────
+        _ty = _H - _MT
+
+        # 左ボックス（SGT D2:F3 + D4:F4 相当）
+        _BW     = 158
+        _BH_TTL = 64    # 「納品明細書」エリア（rows 2-3）
+        _BH_DT  = 34    # 日付エリア（row 4）
+        _BH     = _BH_TTL + _BH_DT
+
+        # 外枠（太線）
+        _c.setLineWidth(1.8)
+        _c.rect(_ML, _ty - _BH, _BW, _BH)
+        # タイトル / 日付 仕切り線
+        _c.setLineWidth(0.8)
+        _c.line(_ML, _ty - _BH_TTL, _ML + _BW, _ty - _BH_TTL)
+
+        # 「納品明細書」
+        _c.setFont(_JA_B, 21)
+        _c.drawCentredString(_ML + _BW / 2, _ty - _BH_TTL / 2 - 8, "納 品 明 細 書")
+
+        # 日付
+        _c.setFont(_JA_B, 12)
+        _c.drawCentredString(_ML + _BW / 2, _ty - _BH_TTL - _BH_DT / 2 - 4,
+                             _date_disp + "納品分")
+
+        # 伝票No セクション（Excel H3:J4 相当）
+        _dx          = _ML + _BW + 22
+        _dn_section_w = 130
+
+        _c.setFont(_JA_B, 12)
+        _c.drawString(_dx, _ty - 14, "伝票No")
+
+        _n_dn = max(len(_denno_list), 1)
+        _dn_slot_h = (_BH_TTL - 18) / _n_dn
+        for _i, (_rng, _dn_d) in enumerate(_denno_list):
+            _dy = _ty - 18 - _dn_slot_h * (_i + 0.5)
+            if _i == 0:
+                _c.setLineWidth(0.6)
+                _c.line(_dx, _dy + _dn_slot_h / 2 + 2,
+                        _dx + _dn_section_w, _dy + _dn_slot_h / 2 + 2)
+            _c.setLineWidth(0.6)
+            _c.line(_dx, _dy - _dn_slot_h / 2 + 2,
+                    _dx + _dn_section_w, _dy - _dn_slot_h / 2 + 2)
+            _c.setFont(_JA_B, 11)
+            _c.drawString(_dx + 2, _dy - 4, _rng)
+            _c.setFont(_JA_B, 16)
+            _c.drawString(_dx + 82, _dy - 6, _dn_d)
+
+        # 会社情報（Excel L2:O4 相当）
+        _rx = _W - _MR - 185
+        _c.setFont(_JA_B, 14)
+        _c.drawString(_rx, _ty - 15, "黒部工業株式会社")
+        _c.setFont(_JA_B, 11)
+        _c.drawString(_rx + 118, _ty - 15, "〒938-0005")
+        _c.setFont(_JA_B, 12)
+        _c.drawString(_rx, _ty - 33, "富山県下新川郡入善町新屋2220")
+        _c.setFont(_JA, 10)
+        _c.drawString(_rx, _ty - 51, "TEL：0765-78-2383　FAX：0765-78-2384")
+
+        # ──────────────────────────────────────
+        # テーブル（Excel rows 7-21 相当）
+        # ──────────────────────────────────────
+        _TABLE_TOP = _ty - _BH - 8
+
+        # 列幅：品名を広くするためLot列を圧縮（Lot日16→11, Lot箱10→7, 削減40u分を品名へ）
+        _COL_UNITS = [5.25, 11.75, 69.625, 12.75, 11.625] + [11, 7] * 5
+        _scale = _TW / sum(_COL_UNITS)
+        _CW = [u * _scale for u in _COL_UNITS]
+
+        _N_LOTS = 5
+        _HDR1_H = 19    # ヘッダー1段（加工Lot内訳スパン）
+        _HDR2_H = 17    # ヘッダー2段（個別列名）
+        _HDR_H  = _HDR1_H + _HDR2_H
+        _N_ROWS = 14
+
+        _AVAIL_H = _TABLE_TOP - _MB
+        _ROW_H   = (_AVAIL_H - _HDR_H) / _N_ROWS
+
+        def _cx(ci):
+            return _ML + sum(_CW[:ci])
+
+        _lot_x1 = _cx(5)
+        _lot_x2 = _ML + sum(_CW)
+
+        # ── ヘッダー（全体を同一グレーで1ブロック）──
+        _y = _TABLE_TOP
+        _c.setFillColorRGB(0.82, 0.82, 0.82)
+        _c.rect(_ML, _y - _HDR_H, _TW, _HDR_H, fill=1, stroke=0)
+        _c.setFillColorRGB(0, 0, 0)
+
+        # 固定列ラベル（縦中央）
+        _hdrs1 = ["番\n号", "明細書No", "品　　名", "数量\n(不良数)", "箱\n数"]
+        for _ci, _h in enumerate(_hdrs1):
+            _cx2 = _cx(_ci) + _CW[_ci] / 2
+            _c.setFont(_JA_B, 8)
+            if "\n" in _h:
+                _ls = _h.split("\n")
+                _c.drawCentredString(_cx2, _y - _HDR_H / 2 - 1, _ls[0])
+                _c.drawCentredString(_cx2, _y - _HDR_H / 2 - 9, _ls[1])
+            else:
+                _c.drawCentredString(_cx2, _y - _HDR_H / 2 - 4, _h)
+
+        # 「加工Lot内訳」スパン（上段）
+        _c.setFont(_JA_B, 10)
+        _c.drawCentredString((_lot_x1 + _lot_x2) / 2, _y - _HDR1_H / 2 - 4,
+                             "加　工　Ｌｏｔ　内　訳")
+        # 仕切り線（加工Lot内訳 / 個別ラベル）
+        _c.setLineWidth(0.4)
+        _c.line(_lot_x1, _y - _HDR1_H, _lot_x2, _y - _HDR1_H)
+
+        # Lot個別ラベル（下段）
+        _c.setFont(_JA, 7)
+        for _li in range(_N_LOTS):
+            _ci_d = 5 + _li * 2
+            _ci_h = 6 + _li * 2
+            _lot_num = "①②③④⑤"[_li]
+            _c.drawCentredString(_cx(_ci_d) + _CW[_ci_d] / 2, _y - _HDR_H + 5,
+                                 f"Lot{_lot_num}")
+            _c.drawCentredString(_cx(_ci_h) + _CW[_ci_h] / 2, _y - _HDR_H + 5, "箱")
+
+        # ── ヘッダー罫線 ──
+        _c.setLineWidth(0.5)
+        # 固定列（番号〜箱数）：全高
+        for _ci in range(6):
+            _xx = _cx(_ci)
+            _c.line(_xx, _y, _xx, _y - _HDR_H)
+        # Lot列：「加工Lot内訳」段（上段）は縦線なし → 下段のみ
+        for _ci in range(5, len(_CW) + 1):
+            _xx = _cx(_ci) if _ci < len(_CW) else _ML + sum(_CW)
+            _c.line(_xx, _y - _HDR1_H, _xx, _y - _HDR_H)
+        # Lot列左端（_lot_x1）と右端は全高
+        _c.line(_lot_x1, _y, _lot_x1, _y - _HDR_H)
+        _c.line(_ML + sum(_CW), _y, _ML + sum(_CW), _y - _HDR_H)
+        _c.setLineWidth(0.8)
+        _c.line(_ML, _y,          _ML + sum(_CW), _y)
+        _c.line(_ML, _y - _HDR_H, _ML + sum(_CW), _y - _HDR_H)
+
+        # ── データ行 ──
+        _y -= _HDR_H
+        _items_pad = list(items) + [None] * (_N_ROWS - len(items))
+        for _ri, _it in enumerate(_items_pad):
+            _ry = _y - _ROW_H
+            if _ri % 2 == 1:
+                _c.setFillColorRGB(0.95, 0.95, 0.97)
+                _c.rect(_ML, _ry, _TW, _ROW_H, fill=1, stroke=0)
+            _c.setFillColorRGB(0, 0, 0)
+            _c.setLineWidth(0.3)
+            for _ci in range(len(_CW) + 1):
+                _xx = _cx(_ci) if _ci < len(_CW) else _ML + sum(_CW)
+                _c.line(_xx, _y, _xx, _ry)
+            _c.line(_ML, _ry, _ML + sum(_CW), _ry)
+
+            # 番号列は常に 1-14 表示
+            _mid_y = _ry + _ROW_H / 2 - 3
+            _c.setFont(_JA_B, 10)
+            _c.drawCentredString(_cx(0) + _CW[0] / 2, _mid_y, str(_ri + 1))
+
+            if _it:
+                _mn = str(_it.get("meisai_no", "")).lstrip("0")
+                _c.setFont(_JA, 8)
+                _c.drawCentredString(_cx(1) + _CW[1] / 2, _mid_y, _mn)
+                _hn = str(_it.get("hinmei", ""))
+                _fs_h = 9 if len(_hn) <= 30 else (8 if len(_hn) <= 42 else 7)
+                _c.setFont(_JA, _fs_h)
+                _c.drawString(_cx(2) + 2, _mid_y, _hn)
+                _qty = _it.get("qty", 0) or 0
+                _fur = _it.get("furyou", 0) or 0
+                _c.setFont(_JA, 9)
+                if _fur:
+                    _c.drawCentredString(_cx(3) + _CW[3] / 2, _mid_y + 5, str(_qty))
+                    _c.setFont(_JA, 7)
+                    _c.drawCentredString(_cx(3) + _CW[3] / 2, _mid_y - 5, f"({_fur})")
+                else:
+                    _c.drawCentredString(_cx(3) + _CW[3] / 2, _mid_y, str(_qty))
+                _hako = _it.get("hako", 0) or 0
+                _c.setFont(_JA, 9)
+                _c.drawCentredString(_cx(4) + _CW[4] / 2, _mid_y,
+                                     str(_hako) if _hako else "")
+                _lots = _it.get("lots") or []
+                for _li, _lot_e in enumerate(_lots[:_N_LOTS]):
+                    if isinstance(_lot_e, (list, tuple)):
+                        _ld, _lh = _lot_e[0], _lot_e[1]
+                    else:
+                        _ld = _lot_e.get("lot", "")
+                        _lh = _lot_e.get("hako", 0)
+                    _ci_d = 5 + _li * 2
+                    _ci_h = 6 + _li * 2
+                    _c.setFont(_JA, 7.5)
+                    if _ld:
+                        _c.drawCentredString(_cx(_ci_d) + _CW[_ci_d] / 2, _mid_y,
+                                             str(_ld).replace(".", ","))
+                    if _lh:
+                        _c.drawCentredString(_cx(_ci_h) + _CW[_ci_h] / 2, _mid_y,
+                                             str(_lh) + "箱")
+            _y -= _ROW_H
+
+        # テーブル外枠（太線）
+        _c.setLineWidth(1.0)
+        _c.rect(_ML, _MB, _TW, _TABLE_TOP - _MB)
+
+        _c.save()
+        return True, str(out_path)
+
+    except Exception as _ex:
+        import traceback as _tb
+        _err_msg = f"納品明細書PDF生成エラー: {_ex}\n{_tb.format_exc()}"
+        _pdf_debug_log(_err_msg)
+        return False, _err_msg
+
+
+def _fill_jisseki(file_path: str, page_num: int, order: dict,
+                  kakou: dict, vf: dict) -> tuple:
+    """openpyxl で帳票エリア (rows 38-55) に実績値を書き込む"""
+    try:
+        import json as _json, unicodedata as _ud, re as _re2, time as _time
+        from openpyxl.cell.cell import MergedCell as _MC
+        from openpyxl.styles import PatternFill as _PFill
+
+        # LibreOffice/OneDrive のファイルロック解放待ちリトライ
+        _wb_loaded = False
+        for _retry in range(6):
+            try:
+                wb = openpyxl.load_workbook(file_path)
+                _wb_loaded = True
+                break
+            except PermissionError:
+                if _retry < 5:
+                    _time.sleep(2)
+        if not _wb_loaded:
+            wb = openpyxl.load_workbook(file_path)  # 最後に例外を通す
+        ws = wb.active
+        pr = 38 + (page_num - 1) * 57  # 帳票先頭行
+
+        def _wc(row, col, val):
+            """マージセルセーフな書き込み（絶対行番号で指定）"""
+            cell = ws.cell(row, col)
+            if isinstance(cell, _MC):
+                # マージ範囲の左上セルを探して書き込む
+                for rng in ws.merged_cells.ranges:
+                    if (rng.min_row <= row <= rng.max_row and
+                            rng.min_col <= col <= rng.max_col):
+                        ws.cell(rng.min_row, rng.min_col).value = val
+                        return
+            else:
+                cell.value = val
+
+        def _w(row_off, col, val):
+            if val is not None and val != "" and val != 0:
+                _wc(pr + row_off, col, val)
+
+        def _to_num(v):
+            try:
+                return float(str(v).replace(",", "").strip())
+            except Exception:
+                return None
+
+        furyou      = kakou.get("furyou") or {}
+        furyou_keys = ["kizu","kubomi","imono","kake","meyani","beko","osen","keijo","sonota"]
+        furyou_lbls = ["キズ","凹み","異物","欠け","メヤニ","ベコツキ","汚損","形状異常","その他"]
+        sei_furyou  = sum((furyou.get(k) or 0) for k in furyou_keys)
+        toru        = int(_to_num(vf.get("取数")) or 1) or 1
+
+        # ── ondan_lookup から換算センター値を引くヘルパー ──
+        try:
+            _up3 = os.environ.get("USERPROFILE", "")
+            _ondan_candidates = [
+                *([((detect_onedrive_work() or Path()) / "VFAP" / "ondan_lookup.json")] if _up3 else []),
+                Path(__file__).resolve().parent / "ondan_lookup.json",
+            ]
+            _ondan_path = next((p for p in _ondan_candidates if p.exists()), None)
+            _ondan_data = _json.loads(_ondan_path.read_text("utf-8")) if _ondan_path else []
+        except Exception:
+            _ondan_data = []
+
+        def _lookup_kanzan(ondo_val):
+            """品名 + ondo から換算センター値を返す。見つからなければ None"""
+            if not _ondan_data or not ondo_val:
+                return None
+            hinmei = order.get("品名") or ""
+            def _norm(s):
+                return _re2.sub(r"\s+", "", _ud.normalize("NFKC", str(s or "")))
+            norm_h  = _norm(hinmei)
+            ondo_str = str(int(float(ondo_val)))
+            for item in _ondan_data:
+                if _norm(item.get("base", "")) == norm_h:
+                    vals = item.get("temps", {}).get(ondo_str)
+                    return vals[1] if (vals and len(vals) >= 2) else None
+            return None
+
+        # ── 静的値 ──
+        _w(1, 1, vf.get("温度換算"))
+        _w(1, 2, vf.get("センター"))           # L寸 ← 品目スペックのセンター値
+        _w(1, 3, vf.get("箱名"))
+        # 使用数 = ceil(入庫数 / 梱包数)　※梱包=1箱あたりの本数(例:100本/箱)。無ければ取数で代替
+        # 入庫数は kiroku③の nyuko_su、なければ受注数量で代替
+        _nyuko_su = int(kakou.get("nyuko_su") or 0) or int(order.get("数量") or 0)
+        _box_div  = int(_to_num(vf.get("梱包")) or 0) or toru
+        _w(1, 5, math.ceil(_nyuko_su / _box_div) if _nyuko_su else None)
+        _w(3, 1, _to_num(vf.get("上限公差")))
+        _w(3, 2, vf.get("切断寸法"))
+        _w(3, 4, vf.get("備考２") or None)    # 梱包行 ← hoho1
+        _w(4, 4, vf.get("梱包方法") or None)  # 方法行 ← hoho2
+        _w(5, 1, _to_num(vf.get("下限公差")))
+        _w(5, 2, _to_num(vf.get("取数")))
+        _w(5, 4, vf.get("備考１") or None)    # 備考行 ← hoho3
+
+        # ── 実績：右側ラベル＋値 ──
+        _wc(pr+1, 9, "入庫日")
+        _w(1, 10, kakou.get("nyuko_bi") or None)
+        _wc(pr+2, 9, "入庫数")
+        _w(2, 10, kakou.get("nyuko_su") or None)
+        _wc(pr+3, 9, "使用基材数")
+        _w(3, 10, kakou.get("kizai_su") or None)
+        _wc(pr+4, 9, "製品不良")
+        if sei_furyou:
+            _wc(pr+4, 10, sei_furyou)
+        _wc(pr+5, 9, "基材不良")
+        _w(5, 10, kakou.get("kizai_furyou") or None)
+        # 端材使用（daily の keisoku_lot="端材" 行の kakou_su を合計）
+        _wc(pr+6, 9, "端材使用")
+        _tanzai_su = sum(int(d.get("kakou_su") or 0)
+                        for d in (kakou.get("daily") or [])
+                        if (d.get("keisoku_lot") or "").strip() == "端材")
+        if _tanzai_su:
+            _wc(pr+6, 10, _tanzai_su)
+
+        # ── 加工Lot・箱数 (row+1〜+2 G・H、最大2Lot) ──
+        lots = kakou.get("lots") or []
+        if lots:
+            _w(1, 7, lots[0].get("lot"))
+            _w(1, 8, lots[0].get("hako"))
+            if len(lots) > 1:
+                _w(2, 7, lots[1].get("lot"))
+                _w(2, 8, lots[1].get("hako"))
+        else:
+            _w(1, 7, kakou.get("kakou_lot"))
+            _w(1, 8, kakou.get("hako_su"))
+
+        # ── 作業者 (row+1 F：切断者①②, row+2 F：検査者③④) ──
+        sakushas = kakou.get("sakushas") or []
+        cut_str  = " / ".join(s for s in sakushas[:2] if s)
+        ken_str  = " / ".join(s for s in sakushas[2:4] if s)
+        if cut_str: _w(1, 6, "切断者　" + cut_str)
+        if ken_str: _w(2, 6, "検査者　" + ken_str)
+
+        # ── row+6: ArrayFormulaを上書き（作業者参照式 → 計測Lot・加工数ヘッダー）──
+        _wc(pr+6, 2, "計測Lot・加工数")
+
+        # ── データエリアをクリア（残留データ防止）──
+        # rows pr+7〜pr+17、col 1-8 および 10 を書き込み前にクリアする
+        for _roff in range(7, 18):
+            _tr = pr + _roff
+            for _col in list(range(1, 9)) + [10]:
+                _c = ws.cell(_tr, _col)
+                if isinstance(_c, _MC):
+                    for _rng in ws.merged_cells.ranges:
+                        if (_rng.min_row <= _tr <= _rng.max_row and
+                                _rng.min_col <= _col <= _rng.max_col and
+                                _rng.min_row >= pr + 7 and
+                                _rng.min_col <= 8):
+                            _tl = ws.cell(_rng.min_row, _rng.min_col)
+                            if not (isinstance(_tl.value, str) and _tl.value.startswith("=")):
+                                _tl.value = None
+                            break
+                else:
+                    if not (isinstance(_c.value, str) and _c.value.startswith("=")):
+                        _c.value = None
+
+        # ── Daily data (row+7〜+15) ── ※ 加工記録1行目 = pr+7
+        daily = kakou.get("daily") or []
+        for i, d in enumerate(daily):
+            r_off = 7 + int(d.get("row_idx") if d.get("row_idx") is not None else i)
+            _w(r_off, 1, d.get("sakugyobi") or None)
+            _ondo = d.get("ondo") or 0
+            if _ondo:
+                _wc(pr + r_off, 3, _ondo)
+            _w(r_off, 5, d.get("keisoku") or None)
+            _kanzan = _lookup_kanzan(_ondo)
+            if _kanzan is not None:
+                _wc(pr + r_off, 4, _kanzan)
+            klot = (d.get("keisoku_lot") or "").strip() or None
+            k_su = d.get("kakou_su") or None
+            if klot and k_su:
+                _wc(pr + r_off, 2, f"{klot} × {k_su}")
+            elif klot:
+                _wc(pr + r_off, 2, klot)
+
+        # ── 不良内訳（col 10）── テンプレラベル位置(pr+8〜)に固定
+        for i, (lbl, key) in enumerate(zip(furyou_lbls, furyou_keys)):
+            v = furyou.get(key)
+            if v:
+                _wc(pr + 8 + i, 10, v)
+
+        # ── ロット使用数 (col F=使用Lot, G=加工数, H=基材換算) ──
+        _lot_agg: dict = {}
+        _lot_order: list = []
+        for d in daily:
+            _lot = (d.get("keisoku_lot") or "").strip()
+            _su  = int(d.get("kakou_su") or 0)
+            if not _lot or _lot == "端材":
+                continue
+            if _lot not in _lot_agg:
+                _lot_agg[_lot] = 0
+                _lot_order.append(_lot)
+            _lot_agg[_lot] += _su
+
+        # 補填ロット確定（lot2が空でhotensuu>0の場合、dailyの最終lotから推定）
+        _lot2  = (kakou.get("lot2") or "").strip()
+        _hoten = int(kakou.get("hotensuu") or 0)
+        if not _lot2 and _hoten and daily:
+            for _drev in reversed(daily):
+                _ll = (_drev.get("keisoku_lot") or "").strip()
+                if _ll and _ll != "端材":
+                    _lot2 = _ll
+                    break
+        # ※ 補填数はロット集計に含めない（加工数 = daily の kakou_su のみ）
+
+        for _i, _lot in enumerate(_lot_order[:5]):
+            _su = _lot_agg[_lot]
+            _r  = 7 + _i
+            _w(_r, 6, _lot)
+            if _su:
+                _w(_r, 7, _su)
+                if toru:
+                    _w(_r, 8, math.ceil(_su / toru))
+
+        # ── 補填行（row+17 col 2）：補填Lot × hotensuu を書き込む ──
+        if _hoten:
+            _hoten_str = f"{_lot2} × {_hoten}" if _lot2 else f"× {_hoten}"
+            _wc(pr + 17, 2, _hoten_str)
+
+        # ── 合計（テンプレにラベル静的あり、値のみ書き込む）──
+        if sei_furyou:
+            _wc(pr+17, 10, sei_furyou)
+
+        # ── データエリア(pr+7〜pr+17)の行高さを統一（LibreOffice描画ズレ対策）──
+        for _rh in range(7, 18):
+            ws.row_dimensions[pr + _rh].height = 18.95
+
+        # ── 使用Lot 行1・行11 を白背景（左側加工記録との視覚的連動）──
+        _white_fill = _PFill(fill_type="solid", fgColor="FFFFFFFF")
+        for _wr in [pr + 7, pr + 17]:
+            _c6 = ws.cell(_wr, 6)
+            if isinstance(_c6, _MC):
+                for _rng in ws.merged_cells.ranges:
+                    if (_rng.min_row <= _wr <= _rng.max_row and
+                            _rng.min_col <= 6 <= _rng.max_col):
+                        ws.cell(_rng.min_row, _rng.min_col).fill = _white_fill
+                        break
+            else:
+                _c6.fill = _white_fill
+
+        wb.save(file_path)
+        return True, "書き込み完了"
+    except Exception as e:
+        import traceback
+        return False, f"書き込みエラー: {traceback.format_exc()}"
+
+
+def _find_soffice():
+    """LibreOffice (soffice.exe) の場所を探す"""
+    candidates = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "LibreOffice" / "program" / "soffice.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "LibreOffice" / "program" / "soffice.exe",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return shutil.which("soffice")
+
+
+def _find_pdftk():
+    """PDFtk (pdftk.exe) の場所を探す"""
+    candidates = [
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "PDFtk" / "bin" / "pdftk.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "PDF Labs" / "PDFtk" / "bin" / "pdftk.exe",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "PDFtk Server" / "bin" / "pdftk.exe",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return shutil.which("pdftk")
+
+
+def _pdf_debug_log(text: str):
+    """VFAP\\pdf_debug.log に追記（成否どちらも残す）"""
+    try:
+        _log_path = Path(__file__).resolve().parent / "pdf_debug.log"
+        with open(_log_path, "a", encoding="utf-8") as _lf:
+            _lf.write(f"\n===== {datetime.now():%Y-%m-%d %H:%M:%S} =====\n{text}\n")
+    except Exception:
+        pass
+
+
+def _export_pdf_direct(file_path: str, page_num: int, pdf_path: str) -> tuple:
+    """
+    LibreOffice headless で xlsx を PDF に変換し、PDFtk で該当ページを抜き出す。
+    Excel COM は使わない（COM の Workbooks.Open がこの種のファイルを拒否するため）。
+    - 全ページ変換した PDF は TEMP にキャッシュし、同一ファイル複数ページの
+      連続出力では 2 ページ目以降の変換をスキップする（xlsx 更新時は再変換）
+    """
+    if not Path(file_path).exists():
+        return False, f"ファイルが見つかりません: {file_path}"
+
+    _abs_path = Path(file_path).resolve()
+    _pdf_path = Path(pdf_path).resolve()
+
+    # OneDrive「クラウドのみ」対策：変換前に必ず実体化する
+    try:
+        with open(_abs_path, "rb") as _hf:
+            _hf.read(8)
+    except OSError as _he:
+        return False, f"ファイル実体化失敗（OneDrive未ダウンロード？）: {_he}"
+
+    soffice = _find_soffice()
+    if not soffice:
+        return False, "LibreOffice が見つかりません（PDF変換に必要です）"
+    pdftk = _find_pdftk()
+    if not pdftk:
+        return False, "PDFtk が見つかりません（ページ抽出に必要です）"
+
+    import tempfile as _tmpmod
+    import hashlib as _hashmod
+    _cache_root = Path(os.environ.get("TEMP", _tmpmod.gettempdir())) / "lo_pdf_cache"
+    _sub = _hashmod.md5(str(_abs_path).encode("utf-8")).hexdigest()[:12]
+    _cache_dir = _cache_root / _sub
+    _cache_dir.mkdir(parents=True, exist_ok=True)
+    _full_pdf = _cache_dir / (_abs_path.stem + ".pdf")
+
+    try:
+        # ── ① xlsx → PDF（全ページ）。キャッシュが新しければスキップ ──
+        _need_convert = (not _full_pdf.exists()
+                         or _full_pdf.stat().st_mtime < _abs_path.stat().st_mtime)
+        if _need_convert:
+            _res = subprocess.run(
+                [soffice, "--headless", "--norestore",
+                 "--convert-to", "pdf", "--outdir", str(_cache_dir), str(_abs_path)],
+                capture_output=True, text=True, timeout=180,
+                encoding="cp932", errors="replace",
+            )
+            if not _full_pdf.exists():
+                _pdf_debug_log(
+                    f"LO変換失敗\nxlsx: {_abs_path}\nexit: {_res.returncode}\n"
+                    f"stdout:\n{_res.stdout}\nstderr:\n{_res.stderr}"
+                )
+                return False, f"LibreOffice変換失敗: {(_res.stderr or _res.stdout or '').strip()[:300]}"
+
+        # ── ② 該当ページを PDFtk で抽出 ──
+        _pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        _res2 = subprocess.run(
+            [pdftk, str(_full_pdf), "cat", str(int(page_num)), "output", str(_pdf_path)],
+            capture_output=True, text=True, timeout=60,
+            encoding="cp932", errors="replace",
+        )
+        if _res2.returncode != 0 or not _pdf_path.exists():
+            _pdf_debug_log(
+                f"pdftk抽出失敗\nfull: {_full_pdf}\npage: {page_num}\n"
+                f"exit: {_res2.returncode}\nstderr:\n{_res2.stderr}"
+            )
+            return False, f"ページ抽出失敗(p{page_num}): {(_res2.stderr or '').strip()[:300]}"
+
+        _pdf_debug_log(f"成功 (LibreOffice方式)\nxlsx: {_abs_path}\npdf : {_pdf_path}\npage: {page_num}")
+        return True, pdf_path
+
+    except subprocess.TimeoutExpired:
+        return False, "PDF出力タイムアウト（LibreOffice変換180秒）"
+    except Exception as _e:
+        return False, f"PDF出力エラー [{type(_e).__name__}]: {_e}"
+
+
+def _export_pdf_via_com(file_path: str, page_num: int, pdf_path: str) -> tuple:
+    """Excel COM で PDF 出力。ハイパーリンク警告をレジストリで一時無効化してから実行。"""
+    import tempfile, shutil as _shutil, subprocess as _sp, sys as _sys, json as _json
+    if not Path(file_path).exists():
+        return False, f"ファイルが見つかりません: {file_path}"
+    tmp_dir = None
+    try:
+        tmp_dir  = tempfile.mkdtemp(dir=os.environ.get("TEMP", tempfile.gettempdir()))
+        import re as _re_pdf, zipfile as _zf
+        safe_name = _re_pdf.sub(r'[^\w.]', '_', Path(file_path).name)
+        tmp_xlsx = str(Path(tmp_dir) / safe_name)
+
+        # externalLinks を除去した xlsx を TEMP に作成
+        _ext_pat = _re_pdf.compile(r'externalLink', _re_pdf.IGNORECASE)
+        with _zf.ZipFile(file_path, 'r') as _zin,              _zf.ZipFile(tmp_xlsx, 'w', _zf.ZIP_DEFLATED) as _zout:
+            for _item in _zin.infolist():
+                _data = _zin.read(_item.filename)
+                _nm   = _item.filename
+                if 'externalLinks' in _nm:          # externalLinks ファイルをスキップ
+                    continue
+                if _nm == 'xl/_rels/workbook.xml.rels':   # 参照も削除
+                    _txt = _data.decode('utf-8')
+                    _txt = _re_pdf.sub(r'<Relationship[^>]*externalLink[^>]*/>', '', _txt)
+                    _data = _txt.encode('utf-8')
+                if _nm == 'xl/workbook.xml':              # externalReferences タグ削除
+                    _txt = _data.decode('utf-8')
+                    _txt = _re_pdf.sub(r'<externalReferences[^>]*>.*?</externalReferences>', '', _txt, flags=_re_pdf.DOTALL)
+                    _data = _txt.encode('utf-8')
+                if _nm == '[Content_Types].xml':           # ContentTypes から除去
+                    _txt = _data.decode('utf-8')
+                    _txt = _re_pdf.sub(r'<Override[^>]*externalLink[^>]*/>', '', _txt)
+                    _data = _txt.encode('utf-8')
+                _zout.writestr(_item, _data)
+
+        args = _json.dumps({
+            "xlsx": tmp_xlsx,
+            "pdf":  str(pdf_path),
+            "page": page_num,
+        })
+        # レジストリでハイパーリンク警告を一時無効 → COM実行 → 復元
+        _script = (
+            "import json,pythoncom,win32com.client,sys,winreg\n"
+            "a=json.loads(sys.argv[1])\n"
+            # ハイパーリンク警告を一時無効化
+            "saved={}\n"
+            "for ver in ['16.0','15.0','14.0']:\n"
+            "    kp=rf'Software\\Microsoft\\Office\\{ver}\\Excel\\Security'\n"
+            "    try:\n"
+            "        k=winreg.OpenKey(winreg.HKEY_CURRENT_USER,kp,0,winreg.KEY_READ|winreg.KEY_SET_VALUE)\n"
+            "        try: ov,_=winreg.QueryValueEx(k,'DisableHyperlinkWarning')\n"
+            "        except: ov=None\n"
+            "        winreg.SetValueEx(k,'DisableHyperlinkWarning',0,winreg.REG_DWORD,1)\n"
+            "        saved[kp]=ov; winreg.CloseKey(k)\n"
+            "    except: pass\n"
+            "pythoncom.CoInitialize()\n"
+            "xl=None\n"
+            "try:\n"
+            "    xl=win32com.client.DispatchEx('Excel.Application')\n"
+            "    xl.Visible=False;xl.DisplayAlerts=False\n"
+            "    wb=xl.Workbooks.Open(a['xlsx'],UpdateLinks=0,ReadOnly=True)\n"
+            "    wb.Sheets(1).ExportAsFixedFormat(0,a['pdf'],0,False,False,a['page'],a['page'],False)\n"
+            "    wb.Close(False)\n"
+            "    print('OK')\n"
+            "except Exception as e:\n"
+            "    print('ERR:'+str(e));sys.exit(1)\n"
+            "finally:\n"
+            "    xl and xl.Quit()\n"
+            # レジストリ復元
+            "    for kp,ov in saved.items():\n"
+            "        try:\n"
+            "            k=winreg.OpenKey(winreg.HKEY_CURRENT_USER,kp,0,winreg.KEY_SET_VALUE)\n"
+            "            if ov is None: winreg.DeleteValue(k,'DisableHyperlinkWarning')\n"
+            "            else: winreg.SetValueEx(k,'DisableHyperlinkWarning',0,winreg.REG_DWORD,ov)\n"
+            "            winreg.CloseKey(k)\n"
+            "        except: pass\n"
+        )
+        res = _sp.run([_sys.executable, "-c", _script, args],
+                      capture_output=True, text=True, timeout=120)
+        out = (res.stdout or "").strip()
+        err = (res.stderr or "").strip()
+        if out == "OK":
+            return True, pdf_path
+        return False, f"PDF出力エラー: {out or err or f'exit={res.returncode}'}"
+    except _sp.TimeoutExpired:
+        return False, "PDF出力タイムアウト（120秒）"
+    except Exception as e:
+        return False, f"PDF出力エラー: {e}"
+    finally:
+        if tmp_dir:
+            try: _shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception: pass
+
+
+def _merge_pdfs_pdftk(pdf_paths: list, out_pdf: str) -> tuple:
+    """PDFtk で複数 PDF を 1 ファイルに結合"""
+    pdftk = _find_pdftk()
+    if not pdftk:
+        return False, "PDFtk が見つかりません"
+    try:
+        cmd = [pdftk] + [str(p) for p in pdf_paths] + ["cat", "output", str(out_pdf)]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if res.returncode != 0:
+            return False, f"PDFtk エラー: {res.stderr}"
+        return True, out_pdf
+    except Exception as e:
+        return False, f"PDFtk 実行エラー: {e}"
+
+def paste_shizusho_via_com(sgt_path: Path, target_items: list) -> tuple:
+    """
+    SGT.xlsm「指図書」シートの 38:56 行を各指示書ファイルに貼り付ける。
+    target_items: [(file_path_str, page_num), ...]
+    戻り値: (成功: bool, メッセージ: str)
+    """
+    if not target_items:
+        return True, "貼り付け対象なし"
+    try:
+        import pythoncom
+        import win32com.client
+        pythoncom.CoInitialize()
+    except ImportError:
+        return False, "pywin32 未インストール（pip install pywin32）"
+
+    new_instance = False
+    excel = None
+    try:
+        excel, new_instance = _get_or_open_excel()
+
+        # ダイアログを全て抑制・描画停止
+        excel.DisplayAlerts    = False
+        excel.ScreenUpdating   = False
+        excel.AskToUpdateLinks = False
+
+        try:
+            wb_sgt = _get_or_open_wb(excel, sgt_path)
+            if wb_sgt is None:
+                return False, "SGT.xlsm を開けませんでした"
+
+            ws_src = wb_sgt.Sheets("指図書")
+            pasted = 0
+            current_path = None
+            wb_tgt = None
+
+            for file_path, page_num in target_items:
+                if not Path(file_path).exists():
+                    continue
+                try:
+                    page_num = int(page_num or 1)
+                except Exception:
+                    page_num = 1
+                paste_row = 38 + (page_num - 1) * 57
+
+                if current_path != file_path:
+                    if wb_tgt is not None:
+                        wb_tgt.Save()
+                        wb_tgt.Close(False)
+                        wb_tgt = None
+                    wb_tgt = excel.Workbooks.Open(
+                        file_path,
+                        UpdateLinks=0    # リンク更新ダイアログを抑制
+                    )
+                    current_path = file_path
+
+                ws_src.Rows("38:56").Copy(
+                    Destination=wb_tgt.Sheets(1).Rows(str(paste_row))
+                )
+                excel.CutCopyMode = False   # クリップボードを即解放
+
+                pasted += 1
+
+            if wb_tgt is not None:
+                wb_tgt.Save()
+                wb_tgt.Close(False)
+
+        finally:
+            # 必ず元に戻す
+            excel.DisplayAlerts  = True
+            excel.ScreenUpdating = True
+            if new_instance:
+                excel.Quit()
+
+        return True, f"{pasted}件に指図書を貼り付けました"
+
+    except Exception as e:
+        if new_instance and excel:
+            try:
+                excel.Quit()
+            except Exception:
+                pass
+        return False, f"貼り付けエラー: {e}"
+
+# ══════════════════════════════════════════════════════════
+# ページ設定（必ず最初に呼ぶ）
+# ══════════════════════════════════════════════════════════
+st.set_page_config(
+    page_title="SGT管理システム",
+    page_icon="◼",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# ══════════════════════════════════════════════════════════
+# パス設定（会社PC・家PC どちらでも動くよう自動判定）
+# ══════════════════════════════════════════════════════════
+def detect_onedrive_work() -> Path | None:
+    """OneDriveのworkフォルダを環境変数ベースで確実に特定する"""
+    # Windows が自動セットする環境変数を優先（フォルダ名が何でも対応）
+    for ev in ("OneDriveConsumer", "OneDrive", "ONEDRIVE"):
+        od = os.environ.get(ev, "").strip()
+        if od:
+            p = Path(od) / "work"
+            if p.exists():
+                return p
+    # フォールバック：USERPROFILE下のOneDrive*フォルダを総当たり
+    up = os.environ.get("USERPROFILE", "")
+    if up:
+        for d in Path(up).iterdir() if Path(up).exists() else []:
+            if d.name.lower().startswith("onedrive") and (d / "work").exists():
+                return d / "work"
+    return None
+
+
+def detect_base_dir() -> Path:
+    """nittei.json があるフォルダを自動判定（SGT.xlsm は参照しない）"""
+    candidates = []
+
+    # 環境変数で明示指定された場合
+    env_dir = os.environ.get("SGT_BASE_DIR", "").strip()
+    if env_dir:
+        p = Path(env_dir)
+        if p.exists():
+            return p
+
+    _od_work = detect_onedrive_work()
+    if _od_work:
+        # nittei.json の置き場を SGT_cloud に固定（自動探索のドリフト防止）。
+        # SGT_cloud フォルダが在れば nittei.json の有無に関わらず必ずここを採用する。
+        _sgt_cloud = _od_work / "SGT_cloud"
+        try:
+            if _sgt_cloud.exists():
+                return _sgt_cloud
+        except Exception:
+            pass
+        candidates.append(_sgt_cloud)
+        candidates.append(_od_work / "VFAP")
+        candidates.append(_od_work / "sgt2605_cloud_bundle")
+        candidates.append(_od_work)
+
+    # スクリプト自身の場所（フォールバック）
+    try:
+        candidates.append(Path(__file__).resolve().parent)
+    except Exception:
+        pass
+
+    # nittei.json が実在する最初の候補を採用
+    for c in candidates:
+        try:
+            if (c / "nittei.json").exists():
+                return c
+        except Exception:
+            continue
+
+    # どれも見つからなければスクリプトの場所（or カレント）を返す
+    try:
+        return Path(__file__).resolve().parent
+    except Exception:
+        return Path.cwd()
+
+
+def detect_jushi_dir(base: Path) -> Path:
+    """
+    樹脂指示書フォルダを自動判定。
+    優先順位：
+      1. 環境変数 SGT_JUSHI_DIR で明示指定
+      2. よくある SGT_cloud\\input\\樹脂指示書 などの候補
+    見つからなければ最有力候補のパスをそのまま返す（存在チェックは呼び出し側で）。
+    """
+    candidates = []
+
+    env_dir = os.environ.get("SGT_JUSHI_DIR", "").strip()
+    if env_dir:
+        candidates.append(Path(env_dir))
+
+    _od_work2 = detect_onedrive_work()
+    if _od_work2:
+        candidates.append(_od_work2 / "SGT_cloud" / "input" / "樹脂指示書")
+        candidates.append(_od_work2 / "input" / "樹脂指示書")
+
+    # base の近くも見る
+    candidates.append(base / "input" / "樹脂指示書")
+    candidates.append(base / "樹脂指示書")
+
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except Exception:
+            continue
+
+    return candidates[0] if candidates else (base / "樹脂指示書")
+
+
+BASE_DIR    = detect_base_dir()
+SGT_PATH    = BASE_DIR / "SGT.xlsm"
+JUSHI_DIR   = detect_jushi_dir(BASE_DIR)
+STATUS_JSON  = BASE_DIR / "sgt_status.json"
+SEEN_JSON    = BASE_DIR / "iraisho_seen.json"
+DELETED_JSON = BASE_DIR / "iraisho_deleted.json"
+JUSHI_CACHE_PATH = BASE_DIR / "jushi_scan_cache.json"   # mtimeキャッシュ
+# クリーン版（外部リンク除去済み）保管先 ─ app.py と同階層の VFAP フォルダ固定
+CLEAN_DIR   = Path(__file__).resolve().parent / "樹脂指示書_クリーン"
+
+# ── 帳票保管庫（生成済みPDFを年/月で振り分けて保管）──
+CHOHYO_ROOT = BASE_DIR / "帳票保管"
+CHOHYO_DIRS = {
+    "納品明細書": CHOHYO_ROOT / "納品明細書",   # 年/月
+    "配送日程表": CHOHYO_ROOT / "配送日程表",   # 年/月
+    "請求明細書": CHOHYO_ROOT / "請求明細書",   # 年のみ
+}
+CHOHYO_BY_YEAR_ONLY = {"請求明細書"}
+
+# ── iframe内に差し込む「保管庫に保存」ボタン（表示中の週/月をそのままPDF化）──
+#   表示中DOMから<script>を除去した静止HTMLを 8503 サーバへ送る → Edgeでrender
+_CHOHYO_INJECT_HAISO = r"""
+<script>
+(function(){
+  function add(){
+    if(document.getElementById('btn-save-chohyo')) return;
+    document.querySelectorAll('.btn-pdf').forEach(function(x){ if(x.id!=='btn-save-chohyo') x.remove(); });
+    var bar=document.querySelector('.ctrl')||document.body; if(!bar) return;
+    var b=document.createElement('button');
+    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🖨 PDF出力';
+    b.onclick=function(){
+      var ws=document.getElementById('week-start'); var d=ws?ws.value:'';
+      if(!d){alert('週が表示されてません');return;}
+      var dt=new Date(d+'T00:00:00'); var mon=new Date(dt);
+      mon.setDate(mon.getDate()-((mon.getDay()+6)%7));
+      var y=mon.getFullYear(), m=('0'+(mon.getMonth()+1)).slice(-2), dd=('0'+mon.getDate()).slice(-2);
+      var clone=document.documentElement.cloneNode(true);
+      clone.querySelectorAll('script').forEach(function(s){s.remove();});
+      var old=b.textContent; b.disabled=true; b.textContent='保存中…';
+      fetch('http://localhost:8503/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:'配送日程表',year:String(y),month:m,landscape:true,
+          filename:y+m+dd+'_配送日程表.pdf',html:clone.outerHTML})})
+        .then(function(r){return r.json();})
+        .then(function(j){b.textContent=j.ok?'✓ 保管しました':'✗ '+(j.msg||'失敗');})
+        .catch(function(){b.textContent='✗ 通信失敗';})
+        .then(function(){setTimeout(function(){b.textContent=old;b.disabled=false;},2600);});
+    };
+    bar.appendChild(b);
+  }
+  document.addEventListener('DOMContentLoaded',add); setTimeout(add,800);
+})();
+</script>
+"""
+
+_CHOHYO_INJECT_SEIKYUU = r"""
+<script>
+(function(){
+  function add(){
+    if(document.getElementById('btn-save-chohyo')) return;
+    document.querySelectorAll('.btn-pdf').forEach(function(x){ if(x.id!=='btn-save-chohyo') x.remove(); });
+    var bar=document.querySelector('header')||document.body; if(!bar) return;
+    var b=document.createElement('button');
+    b.id='btn-save-chohyo'; b.className='btn-pdf'; b.textContent='🖨 PDF出力';
+    b.onclick=function(){
+      var mh=document.querySelector('.month-header'); var txt=mh?mh.textContent:'';
+      var ym=txt.match(/(\d{4})/); var year=ym?ym[1]:String(new Date().getFullYear());
+      var mons=(txt.match(/(\d+)月/g)||[]).map(function(s){return ('0'+parseInt(s,10)).slice(-2);});
+      if(mons.length===0){mons=[('0'+(new Date().getMonth()+1)).slice(-2)];}
+      var label=year+'-'+mons.join('_');
+      var clone=document.documentElement.cloneNode(true);
+      clone.querySelectorAll('script').forEach(function(s){s.remove();});
+      var old=b.textContent; b.disabled=true; b.textContent='保存中…';
+      fetch('http://localhost:8503/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({kind:'請求明細書',year:year,landscape:false,
+          filename:label+'_請求明細書.pdf',html:clone.outerHTML})})
+        .then(function(r){return r.json();})
+        .then(function(j){b.textContent=j.ok?'✓ 保管しました':'✗ '+(j.msg||'失敗');})
+        .catch(function(){b.textContent='✗ 通信失敗';})
+        .then(function(){setTimeout(function(){b.textContent=old;b.disabled=false;},2600);});
+    };
+    bar.appendChild(b);
+  }
+  document.addEventListener('DOMContentLoaded',add); setTimeout(add,1000);
+})();
+</script>
+"""
+
+
+# ── HTML → PDF（Edge/Chrome の画面なしモードで生成。window.print と同じ見た目）──
+def _find_edge_or_chrome():
+    """msedge.exe / chrome.exe を探す（Windows標準のEdge優先）"""
+    _cands = [
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft" / "Edge" / "Application" / "msedge.exe",
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Google" / "Chrome" / "Application" / "chrome.exe",
+    ]
+    for _c in _cands:
+        try:
+            if _c.exists():
+                return str(_c)
+        except Exception:
+            pass
+    for _n in ("msedge", "chrome", "google-chrome", "chromium"):
+        _w = shutil.which(_n)
+        if _w:
+            return _w
+    return None
+
+
+def _html_to_pdf_edge(html_text: str, out_pdf: Path, landscape: bool = False) -> tuple:
+    """populate済みHTML文字列を Edge/Chrome 画面なしモードでPDF化し out_pdf に保存。
+    A4・余白を @page で固定。戻り値 (ok, msg)。"""
+    _exe = _find_edge_or_chrome()
+    if not _exe:
+        return False, "Edge/Chrome が見つかりません（PDF化の謎の力が使えません）"
+    import tempfile as _tf, uuid as _uuid
+    _tmpdir = Path(_tf.gettempdir()) / "vfap_pdf"
+    try:
+        _tmpdir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    _page_css = ("<style>@page{size:A4 %s;margin:6mm;} "
+                 "html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}</style>"
+                 ) % ("landscape" if landscape else "portrait")
+    if "</head>" in html_text:
+        html_text = html_text.replace("</head>", _page_css + "</head>", 1)
+    else:
+        html_text = _page_css + html_text
+    _tmp_html = _tmpdir / ("_render_" + _uuid.uuid4().hex[:8] + ".html")
+    _tmp_html.write_text(html_text, encoding="utf-8")
+    _user_dir = _tmpdir / ("ud_" + _uuid.uuid4().hex[:8])
+    try:
+        out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        _r = subprocess.run(
+            [_exe, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
+             "--user-data-dir=" + str(_user_dir),
+             "--virtual-time-budget=10000",
+             "--print-to-pdf=" + str(out_pdf), _tmp_html.as_uri()],
+            capture_output=True, text=True, timeout=120,
+            encoding="cp932", errors="replace",
+        )
+        if not out_pdf.exists():
+            return False, "PDF生成失敗: " + (_r.stderr or "")[:300]
+        return True, str(out_pdf)
+    except Exception as _e:
+        return False, str(_e)
+    finally:
+        try:
+            _tmp_html.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+# ══════════════════════════════════════════════════════════
+# nittei.json 保存サーバー（バックグラウンドスレッド port:8502）
+# ══════════════════════════════════════════════════════════
+
+def _sync_kakozu_status(base_dir, nittei_rows: list):
+    # 日程ページ保存時に sgt_status.json の加工済ステータスを同期する
+    # qty > 0 かつ done >= qty の依頼を「加工済」に更新（完了済みは除外）
+    # sgt_status.json の各エントリに "no" フィールドが保存されている必要がある
+    status_path = base_dir / "sgt_status.json"
+    try:
+        status_dict = json.loads(status_path.read_text("utf-8")) if status_path.exists() else {}
+    except Exception:
+        return
+    # no → status_key の逆引きマップを構築
+    no_to_key = {
+        str(v.get("no", "")).strip(): k
+        for k, v in status_dict.items()
+        if v.get("no")
+    }
+    updated = False
+    for row in nittei_rows:
+        no = str(row.get("no", "")).strip()
+        if not no:
+            continue
+        qty  = int(row.get("qty",  0) or 0)
+        done = int(row.get("done", 0) or 0)
+        key = no_to_key.get(no)
+        if not key or key not in status_dict:
+            continue
+        if status_dict[key].get("status") == "完了":
+            continue  # 完了済みは上書きしない
+        if qty > 0 and done >= qty:
+            status_dict[key]["status"] = "加工済"
+            updated = True
+    if updated:
+        try:
+            status_path.write_text(
+                json.dumps(status_dict, ensure_ascii=False, indent=2), "utf-8")
+        except Exception:
+            pass
+
+_SAVE_PORT = 8502
+_save_lock = threading.Lock()
+
+class _SaveHandler(BaseHTTPRequestHandler):
+    base_dir = None
+    def log_message(self, *a): pass
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    def do_OPTIONS(self):
+        self.send_response(204); self._cors(); self.end_headers()
+    def do_GET(self):
+        nittei_path = self.__class__.base_dir / "nittei.json"
+        with _save_lock:
+            data = nittei_path.read_bytes() if nittei_path.exists() else b"[]"
+        self.send_response(200); self._cors()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+    def do_POST(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            data = json.loads(self.rfile.read(length))
+            nittei_path = self.__class__.base_dir / "nittei.json"
+            with _save_lock:
+                nittei_path.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                # 加工完了依頼の sgt_status.json 同期（qty==done の依頼を加工済に更新）
+                _sync_kakozu_status(self.__class__.base_dir, data)
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+        except Exception as e:
+            self.send_response(500); self._cors(); self.end_headers()
+            self.wfile.write(f'{{"error":"{e}"}}'.encode())
+
+def _start_save_server(base_dir: Path):
+    _SaveHandler.base_dir = base_dir
+    try:
+        srv = HTTPServer(("localhost", _SAVE_PORT), _SaveHandler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+    except OSError:
+        pass  # 既に起動済み
+
+_start_save_server(BASE_DIR)
+
+# ══════════════════════════════════════════════════════════
+# kakou_kiroku.json 保存サーバー（バックグラウンドスレッド port:8503）
+# ══════════════════════════════════════════════════════════
+_KAKOU_PORT = 8503
+_kakou_lock = threading.Lock()
+
+def _save_case_json(base_dir: Path, record: dict):
+    """① 段階移行：1案件1JSONを records/年/月/明細No.json にアトミック保存する。
+    納品日(yy/mm/dd)で年・月フォルダへ振り分け。納品月が変わったら旧ファイルを削除（引っ越し）。
+    既存の kakou_kiroku.json はそのまま残す（並行書き込み）。失敗してもノート保存には影響させない。"""
+    import re as _re_case
+    nb = str(record.get("nohin_bi") or "").strip()
+    m = _re_case.match(r"^(\d{2})/(\d{2})/(\d{2})$", nb)
+    if not m:
+        return  # 納品日が無い/不正ならスキップ
+    yy, mm, _dd = m.groups()
+    year = "20" + yy
+    mno = str(record.get("meisai_no") or "").strip()
+    if not mno:
+        return
+    records_root = base_dir / "records"
+    target_dir = records_root / year / mm
+    target = target_dir / (mno + ".json")
+    # 月引っ越し：同名ファイルが別の年/月にあれば削除（納品日変更対応）
+    if records_root.exists():
+        for old in records_root.glob("*/*/" + mno + ".json"):
+            try:
+                if old.resolve() != target.resolve():
+                    old.unlink()
+            except Exception:
+                pass
+    target_dir.mkdir(parents=True, exist_ok=True)
+    # アトミック保存：temp に書いてから os.replace で置換
+    tmp = target_dir / (mno + ".json.tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(str(tmp), str(target))
+
+
+class _KakouHandler(BaseHTTPRequestHandler):
+    base_dir = None
+    def log_message(self, *a): pass
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    def do_OPTIONS(self):
+        self.send_response(204); self._cors(); self.end_headers()
+    def do_GET(self):
+        if self.path.split("?")[0] == "/chohyo_ping":
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"ok":true,"ver":"chohyo1"}')
+            return
+        if self.path.split("?")[0] == "/serve_pdf":
+            try:
+                from urllib.parse import urlparse as _up, parse_qs as _pq, unquote as _uq
+                _qp = _pq(_up(self.path).query)
+                _pp = _uq(_qp.get("p", [""])[0])
+                _target = Path(_pp).resolve()
+                _root   = CHOHYO_ROOT.resolve()
+                _okpath = str(_target).startswith(str(_root)) and _target.suffix.lower() == ".pdf" and _target.exists()
+                if not _okpath:
+                    self.send_response(404); self._cors(); self.end_headers(); return
+                _pdfb = _target.read_bytes()
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Length", str(len(_pdfb)))
+                self.send_header("Content-Disposition", "inline; filename=report.pdf")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(_pdfb)
+            except Exception:
+                self.send_response(500); self._cors(); self.end_headers()
+            return
+        if self.path.split("?")[0] == "/ui":
+            # app.py と同じフォルダの kiroku.html を使う（BASE_DIR とは独立）
+            ui_path = Path(__file__).resolve().parent / "kiroku.html"
+            try:
+                data = ui_path.read_bytes() if ui_path.exists() else b"<h1>kiroku.html not found</h1>"
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.end_headers()
+                self.wfile.write(data)
+                self.wfile.flush()
+            except Exception as _e:
+                self.send_response(500); self._cors()
+                self.send_header("Content-Length", str(len(str(_e).encode())))
+                self.end_headers()
+                self.wfile.write(str(_e).encode())
+            return
+        with _kakou_lock:
+            try:
+                data = json.dumps(_load_all_cases(self.__class__.base_dir),
+                                  ensure_ascii=False).encode("utf-8")
+            except Exception:
+                data = b"[]"
+        self.send_response(200); self._cors()
+        self.send_header("Content-Type", "application/json"); self.end_headers()
+        self.wfile.write(data)
+    def do_POST(self):
+        # ── 帳票保管庫：表示中HTMLを受け取りEdgeでPDF化して保管 ──
+        if self.path.split("?")[0] == "/save_chohyo":
+            try:
+                _len = int(self.headers.get("Content-Length", 0))
+                _pl  = json.loads(self.rfile.read(_len))
+                _kind  = _pl.get("kind", "")
+                _html  = _pl.get("html", "")
+                _land  = bool(_pl.get("landscape"))
+                _fname = _pl.get("filename") or "report.pdf"
+                _year  = str(_pl.get("year") or "")
+                _month = str(_pl.get("month") or "")
+                if _kind not in CHOHYO_DIRS or not _html:
+                    raise ValueError("bad request")
+                _odir = CHOHYO_DIRS[_kind] / _year
+                if _month:
+                    _odir = _odir / _month
+                _outp = _odir / _fname
+                _ok, _msg = _html_to_pdf_edge(_html, _outp, landscape=_land)
+                self.send_response(200 if _ok else 500); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps(
+                    {"ok": _ok, "msg": _msg, "path": str(_outp)},
+                    ensure_ascii=False).encode("utf-8"))
+            except Exception as _e:
+                self.send_response(500); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps(
+                    {"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            record = json.loads(self.rfile.read(length))
+            kakou_path = self.__class__.base_dir / "kakou_kiroku.json"
+            with _kakou_lock:
+                if kakou_path.exists():
+                    try:
+                        all_records = json.loads(kakou_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        all_records = []
+                else:
+                    all_records = []
+                # meisai_no で upsert
+                idx = next(
+                    (i for i, r in enumerate(all_records)
+                     if str(r.get("meisai_no")) == str(record.get("meisai_no"))),
+                    None
+                )
+                if idx is not None:
+                    all_records[idx] = record
+                else:
+                    all_records.append(record)
+                kakou_path.write_text(
+                    json.dumps(all_records, ensure_ascii=False, indent=2), encoding="utf-8")
+                # 加工記録の保存時のみ、日程の進捗(done)に入庫数(nyuko_su)を反映する
+                try:
+                    _np = self.__class__.base_dir / "nittei.json"
+                    _nsu = record.get("nyuko_su")
+                    # 「完了」ボタン押下時(kanryo=true)のみ反映。下書き自動保存(kanryo=false)では done に触れない
+                    if _np.exists() and record.get("kanryo") and _nsu is not None:
+                        with _save_lock:
+                            _nrows = json.loads(_np.read_text(encoding="utf-8"))
+                            try:
+                                _nsu = int(_nsu)
+                            except Exception:
+                                _nsu = 0
+                            if _nsu < 0:
+                                _nsu = 0
+                            _mno = str(record.get("meisai_no"))
+                            _ch = False
+                            for _nr in _nrows:
+                                if str(_nr.get("no")) == _mno:
+                                    _q = int(_nr.get("qty", 0) or 0)
+                                    if _q and _nsu > _q:
+                                        _nsu = _q
+                                    if _nr.get("done") != _nsu:
+                                        _nr["done"] = _nsu
+                                        _ch = True
+                                    break
+                            if _ch:
+                                _np.write_text(
+                                    json.dumps(_nrows, ensure_ascii=False, indent=2),
+                                    encoding="utf-8")
+                except Exception:
+                    pass
+                # ① 段階移行：1案件1JSONも書き出す（失敗してもノート保存には影響させない）
+                try:
+                    _save_case_json(self.__class__.base_dir, record)
+                except Exception:
+                    pass
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+        except Exception as e:
+            self.send_response(500); self._cors(); self.end_headers()
+            self.wfile.write(f'{"error":"{e}"}'.encode())
+
+def _start_kakou_server(base_dir: Path):
+    _KakouHandler.base_dir = base_dir
+    try:
+        srv = ThreadingHTTPServer(("localhost", _KAKOU_PORT), _KakouHandler)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+    except OSError:
+        pass  # 既に起動済み
+
+_start_kakou_server(BASE_DIR)
+
+
+# ══════════════════════════════════════════════════════════
+# CSS：Claude ダークテーマ
+# ══════════════════════════════════════════════════════════
+st.markdown("""
+<style>
+/* ── 背景 ── */
+.stApp                            { background: #1C1C1C; }
+[data-testid="stSidebar"]         { background: #161616; border-right: 1px solid #2A2A2A; min-width: 230px !important; max-width: 260px !important; }
+
+/* ── 本文上部の余白を詰める ── */
+.block-container { padding-top: 1.5rem !important; }
+/* タイトル等の見出しが上で見切れないよう余白を整える */
+.block-container h1,
+.block-container h2,
+.block-container h3 {
+    margin-top: 0 !important;
+    padding-top: 0.15rem !important;   /* 0 だと上端が見切れるため少し戻す */
+    line-height: 1.5 !important;       /* 行高を確保して上半分のクリップを防ぐ */
+    overflow: visible !important;
+}
+
+/* ── メトリクスカード（コンパクト） ── */
+[data-testid="metric-container"]  {
+    background: #222; border: 1px solid #333;
+    border-radius: 6px; padding: 4px 10px;
+}
+[data-testid="stMetricValue"] { font-size: 1.4rem !important; line-height: 1.1 !important; }
+[data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
+
+/* ── 縦余白を全体的に詰める ── */
+hr { margin: 0.4rem 0 0.8rem !important; }
+[data-testid="stVerticalBlock"] { gap: 0.5rem !important; }
+.block-container { padding-bottom: 1rem !important; }
+
+/* ── ボタン（モノトーン）セカンダリのみ ── */
+.stButton > button[kind="secondary"] {
+    background: #2A2A2A;
+    color: #E8E8E8; font-weight: 600;
+    border: 1px solid #3A3A3A; border-radius: 6px;
+}
+.stButton > button[kind="secondary"]:hover { background: #333; border-color: #555; color: #FFF; }
+
+/* ── データフレーム ── */
+[data-testid="stDataFrame"] { border-radius: 8px; overflow: hidden; }
+
+/* ── インプット系 ── */
+.stTextInput  > div > div { background: #222; border-color: #333; }
+.stSelectbox  > div > div { background: #222; border-color: #333; }
+.stMultiSelect > div      { background: #222; border-color: #333; }
+
+/* ── 右上メニュー（Deployボタン・⋮メニュー）を非表示 ── */
+[data-testid="stToolbar"]      { display: none !important; }
+[data-testid="stDecoration"]   { display: none !important; }
+#MainMenu                      { display: none !important; }
+.stDeployButton                { display: none !important; }
+
+[data-testid="stSidebar"][aria-expanded="false"] {
+    transform: none !important;
+    visibility: visible !important;
+}
+
+/* ── スクロールバー ── */
+::-webkit-scrollbar              { width: 17px; height: 17px; }
+::-webkit-scrollbar-track        { background: #1C1C1C; }
+::-webkit-scrollbar-thumb        { background: #d97757; border-radius: 6px; border: 2px solid #1C1C1C; }
+::-webkit-scrollbar-thumb:hover  { background: #e89070; }
+::-webkit-scrollbar-corner       { background: #1C1C1C; }
+</style>
+""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════
+# 定数
+# ══════════════════════════════════════════════════════════
+STATUS_OPTIONS = ["新規", "処理中", "完了", "取込済", "加工済"]
+STATUS_ICON    = {"新規": "🔵", "処理中": "🟡", "完了": "⚪", "取込済": "🟠", "加工済": "🟢"}
+
+# ══════════════════════════════════════════════════════════
+# ユーティリティ
+# ══════════════════════════════════════════════════════════
+def normalize_path(p: str) -> str:
+    """ユーザー名依存をなくすパス正規化"""
+    import re as _re_np
+    s = str(Path(p)).lower()
+    # c:\users\<誰でも>\ → c:\users\_\ に統一してユーザー名差異を吸収
+    s = _re_np.sub(r"(^[a-z]:\\users\\)[^\\]+\\", r"\1_\\", s)
+    return s
+
+def calc_hours(suryo, kosuu):
+    """加工時間(h) = 数量 ÷ 切断工数(本/h)"""
+    try:
+        return round(float(suryo) / float(kosuu), 1)
+    except Exception:
+        return None
+
+def calc_days(hours):
+    """加工日数 = ceil(時間 ÷ 8h)"""
+    try:
+        return math.ceil(float(hours) / 8)
+    except Exception:
+        return None
+
+def fmt_date(val):
+    """日付を mm/dd 形式に"""
+    if val is None:
+        return ""
+    if isinstance(val, (datetime,)):
+        return val.strftime("%m/%d")
+    try:
+        return pd.to_datetime(val).strftime("%m/%d")
+    except Exception:
+        return str(val)
+
+def fmt_datetime(val):
+    """更新日時を mm/dd HH:MM 形式に"""
+    if val is None:
+        return ""
+    if isinstance(val, (datetime,)):
+        return val.strftime("%m/%d %H:%M")
+    try:
+        return pd.to_datetime(val).strftime("%m/%d %H:%M")
+    except Exception:
+        return str(val)
+
+def get_mtime(file_path):
+    """ファイルの最終更新日時を datetime で返す（取れなければ None）"""
+    try:
+        p = Path(file_path)
+        if p.exists():
+            return datetime.fromtimestamp(p.stat().st_mtime)
+    except Exception:
+        pass
+    return None
+
+def open_workbook_safely(path: Path, **kwargs):
+    """
+    Excelで開きっぱなしの SGT.xlsm でも読めるよう、
+    まず普通に開き、ロックで失敗したら一時コピー経由で開く。
+    戻り値: (workbook, tmp_path)  tmp_path は使い終わったら削除する
+    """
+    # まず通常オープンを試す
+    try:
+        wb = openpyxl.load_workbook(str(path), **kwargs)
+        return wb, None
+    except (PermissionError, OSError):
+        pass
+
+    # 失敗したら一時フォルダにコピーしてから開く（排他ロック回避）
+    tmp_dir  = tempfile.gettempdir()
+    tmp_path = Path(tmp_dir) / f"_sgt_tmp_{os.getpid()}_{path.name}"
+    shutil.copy2(str(path), str(tmp_path))
+    wb = openpyxl.load_workbook(str(tmp_path), **kwargs)
+    return wb, tmp_path
+
+def cleanup_tmp(tmp_path):
+    """一時コピーの後片付け"""
+    if tmp_path:
+        try:
+            os.remove(str(tmp_path))
+        except Exception:
+            pass
+
+# ══════════════════════════════════════════════════════════
+# ステータス JSON 管理
+# ══════════════════════════════════════════════════════════
+def load_status() -> dict:
+    if STATUS_JSON.exists():
+        try:
+            return json.loads(STATUS_JSON.read_text("utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def save_status(d: dict):
+    try:
+        STATUS_JSON.write_text(json.dumps(d, ensure_ascii=False, indent=2), "utf-8")
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+def load_seen_paths() -> set:
+    """取り込み済み指示書の正規化パス一覧を返す"""
+    if SEEN_JSON.exists():
+        try:
+            return set(json.loads(SEEN_JSON.read_text("utf-8")))
+        except Exception:
+            return set()
+    return set()
+
+def save_seen_paths(paths: set):
+    """取り込み済みパス一覧を永続化する"""
+    try:
+        SEEN_JSON.write_text(json.dumps(sorted(paths), ensure_ascii=False, indent=2), "utf-8")
+    except Exception:
+        pass
+
+def load_deleted_keys() -> set:
+    """削除済み案件の (正規化パス#ページ) キー一覧を返す"""
+    if DELETED_JSON.exists():
+        try:
+            return set(json.loads(DELETED_JSON.read_text("utf-8")))
+        except Exception:
+            return set()
+    return set()
+
+def save_deleted_keys(keys: set):
+    """削除済みキーを永続化する"""
+    try:
+        DELETED_JSON.write_text(json.dumps(sorted(keys), ensure_ascii=False, indent=2), "utf-8")
+    except Exception:
+        pass
+
+# ══════════════════════════════════════════════════════════
+# VFDB2 読み込み（5分キャッシュ）
+# ══════════════════════════════════════════════════════════
+@st.cache_data(ttl=300, show_spinner="VFDB2 読み込み中...")
+def load_vfdb() -> dict:
+    """vfdb.json を読んで 品目コード→属性dict のマップを返す（SGT不要）"""
+    # BASE_DIR が SGT_cloud 等を向いていても見つかるよう複数箇所を試す
+    _up = os.environ.get("USERPROFILE", "")
+    candidates = [
+        BASE_DIR / "vfdb.json",
+        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up else []),
+        Path(__file__).resolve().parent / "vfdb.json",
+    ]
+    vfdb_json = next((p for p in candidates if p.exists()), None)
+    if vfdb_json is None:
+        return {}
+    try:
+        rows = json.loads(vfdb_json.read_text("utf-8"))
+        db = {}
+        for row in rows:
+            code = str(row.get("品目コード", "") or "")
+            if not code:
+                continue
+            db[code] = {
+                "品名"     : row.get("品名"),
+                "切断工数" : row.get("切断工数"),
+                "梱包"     : row.get("梱包"),
+                "単価"     : row.get("単価"),
+                "業態"     : row.get("業態"),
+                "温度換算" : row.get("温度換算"),
+                "下限公差" : row.get("下限公差"),
+                "上限公差" : row.get("上限公差"),
+                "取数"     : row.get("取数"),
+                "梱包方法" : row.get("梱包方法"),
+                "梱包箱"   : row.get("梱包箱支給係数"),
+                "切断寸法" : row.get("切断寸法"),
+                "センター" : row.get("センター"),
+                "備考１"   : row.get("備考１"),
+                "備考２"   : row.get("備考２"),
+            }
+        return db
+    except Exception as e:
+        st.error(f"vfdb.json 読み込みエラー: {e}")
+        return {}
+
+
+def build_vfdb_spec_by_name() -> dict:
+    """vfdb.json を 品名(空白除去)→品目スペック dict に整形（加工記録モーダル左パネル用）"""
+    import re as _re2, unicodedata as _ud
+    _up2 = os.environ.get("USERPROFILE", "")
+    candidates = [
+        BASE_DIR / "vfdb.json",
+        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up2 else []),
+        Path(__file__).resolve().parent / "vfdb.json",
+    ]
+    p = next((c for c in candidates if c.exists()), None)
+    if p is None:
+        return {}
+    try:
+        recs = json.loads(p.read_text("utf-8"))
+    except Exception:
+        return {}
+    def _norm(s):
+        return _re2.sub(r"\s+", "", _ud.normalize("NFKC", str(s if s is not None else "")))
+    def _v(x):
+        return "" if x is None else x
+    out = {}
+    for r in recs:
+        key = _norm(r.get("品名"))
+        if not key:
+            continue
+        out[key] = {
+            "center": _v(r.get("センター")),
+            "setdan": _v(r.get("切断寸法")),
+            "toru":   _v(r.get("取数")),
+            "ondo":   _v(r.get("温度換算")),
+            "plus":   _v(r.get("上限公差")),
+            "minus":  _v(r.get("下限公差")),
+            "hako":   _v(r.get("箱名")),
+            "irisu":  _v(r.get("梱包")),
+            "hakosu": _v(r.get("梱包箱使用枚数")),
+            "hoho1":  _v(r.get("梱包方法")),
+            "hoho2":  _v(r.get("備考１")),
+            "hoho3":  _v(r.get("備考２")),
+            "kosuu":  _v(r.get("切断工数")),  # 切断工数(本/h) — 日程表の進捗工数表示用
+        }
+    return out
+
+
+# ══════════════════════════════════════════════════════════
+# VFDB2 全列読み込み（データベースページ用、5分キャッシュ）
+# ══════════════════════════════════════════════════════════
+@st.cache_data(ttl=300, show_spinner="VFDB2 読み込み中...")
+def load_vfdb_full() -> pd.DataFrame:
+    """VFDB2シートを全列そのままDataFrameで返す"""
+    if not SGT_PATH.exists():
+        return pd.DataFrame()
+    wb = tmp_path = None
+    try:
+        wb, tmp_path = open_workbook_safely(
+            SGT_PATH, keep_vba=True, data_only=True, read_only=True)
+        ws = wb["VFDB2"]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return pd.DataFrame()
+        header = [str(h) if h is not None else f"列{i+1}" for i, h in enumerate(rows[0])]
+        seen: dict = {}
+        deduped = []
+        for h in header:
+            if h in seen:
+                seen[h] += 1
+                deduped.append(f"{h}.{seen[h]}")
+            else:
+                seen[h] = 0
+                deduped.append(h)
+        data = [list(r) for r in rows[1:] if any(v is not None for v in r)]
+        df = pd.DataFrame(data, columns=deduped)
+        if "品目コード" in df.columns:
+            df = df[df["品目コード"].notna() & (df["品目コード"].astype(str) != "")]
+        return df.reset_index(drop=True)
+    except Exception as e:
+        st.error(f"VFDB2 全列読み込みエラー: {e}")
+        return pd.DataFrame()
+    finally:
+        try:
+            if wb is not None:
+                wb.close()
+        except Exception:
+            pass
+        cleanup_tmp(tmp_path)
+
+# ══════════════════════════════════════════════════════════
+# 依頼書保管シート読み込み（1分キャッシュ）
+# ══════════════════════════════════════════════════════════
+@st.cache_data(ttl=60, show_spinner="依頼書保管 読み込み中...")
+def load_from_sgt() -> list:
+    if not SGT_PATH.exists():
+        return []
+    wb = None
+    tmp_path = None
+    try:
+        wb, tmp_path = open_workbook_safely(
+            SGT_PATH, keep_vba=True, data_only=True, read_only=True)
+        ws = wb["依頼書保管"]
+        records = []
+        for row in ws.iter_rows(min_row=5, values_only=True):
+            # A列（ファイルパス）が空になったら終了
+            if not row[0]:
+                break
+            # 列マッピング（0-indexed）
+            # A=0:パス  B=1:起票判定  C=2:転写判定
+            # D=3:指図書No  E=4:品目番号  F=5:品目コード  G=6:品名
+            # H=7:確定日程  I=8:単価  J=9:取数  K=10:?
+            # L=11:納品日  M=12:数量  N=13:梱包
+            # P=15:ページ  Q=16:切断工数  R=17:業態
+            # V=21:新規FLG  W=22:起票FLG
+            rec = {
+                "file_path"  : str(row[0]),
+                "ファイル名" : Path(str(row[0])).name if row[0] else "",
+                "起票判定"   : row[1],
+                "転写判定"   : row[2],
+                "指図書No"   : str(row[3]) if row[3] else "",
+                "品目番号"   : str(row[4]) if row[4] else "",
+                "品目コード" : str(row[5]) if row[5] else "",
+                "品名"       : str(row[6]) if row[6] else "",
+                "確定日程"   : row[7],
+                "単価"       : row[8],
+                "取数"       : row[9],
+                "納品日"     : row[11],
+                "数量"       : row[12],
+                "梱包"       : row[13],
+                "ページ"     : row[15],
+                "切断工数"   : row[16],
+                "業態"       : row[17],
+                "新規FLG"    : row[21],
+                "起票FLG"    : bool(row[22]) if row[22] else False,
+                "source"     : "sgt",
+            }
+            records.append(rec)
+        return records
+    except Exception as e:
+        st.error(f"依頼書保管 読み込みエラー: {e}")
+        return []
+    finally:
+        try:
+            if wb is not None:
+                wb.close()
+        except Exception:
+            pass
+        cleanup_tmp(tmp_path)
+
+# ══════════════════════════════════════════════════════════
+# 日程データ読み込み（nittei.json から）
+# ══════════════════════════════════════════════════════════
+def sync_sgt_to_nittei() -> tuple:
+    """
+    SGT.xlsm 日程シートの AC/AD/AF 列を nittei.json に同期する。
+    D列（明細No）をキーに照合し、一致した行の
+      AC列 → ac（引き取り）
+      AD列 → ad（納品）
+      AF列 → af（期限）
+    を上書きする。
+    戻り値: (更新件数: int, メッセージ: str)
+    """
+    nittei_path = BASE_DIR / "nittei.json"
+    if not nittei_path.exists():
+        nittei_path = Path(__file__).resolve().parent / "nittei.json"
+    if not nittei_path.exists():
+        return 0, "nittei.json が見つかりません"
+    if not SGT_PATH.exists():
+        return 0, "SGT.xlsm が見つかりません"
+
+    wb = tmp_path = None
+    try:
+        wb, tmp_path = open_workbook_safely(
+            SGT_PATH, keep_vba=True, data_only=True, read_only=True)
+        ws = wb["日程"]
+
+        # D列（col 4）をキーに AC/AD/AF を収集（row 5 以降がデータ）
+        sgt_map: dict[int, dict] = {}
+        sgt_order: list[int] = []
+        for row in ws.iter_rows(min_row=5, values_only=True):
+            d_val = row[3]   # D列 (0-indexed: 3)
+            if not d_val:
+                continue
+            try:
+                meisai_no = int(d_val)
+            except (TypeError, ValueError):
+                continue
+            sgt_map[meisai_no] = {
+                "ac":     fmt_date(row[28]),  # AC列 (0-indexed: 28)
+                "ad":     fmt_date(row[29]),  # AD列 (0-indexed: 29)
+                "af":     fmt_date(row[31]),  # AF列 (0-indexed: 31)
+                "qty":    int(row[20]) if row[20] is not None else None,  # U列 注文数
+                "done":   int(row[22]) if row[22] is not None else None,  # W列 進捗数
+                "kyukyu": int(row[0])  if row[0]  is not None else None,  # A列 支給
+                "shohi":  int(row[1])  if row[1]  is not None else None,  # B列 消費
+                "zansu":  int(row[2])  if row[2]  is not None else None,  # C列 残数
+            }
+            sgt_order.append(meisai_no)
+
+    except Exception as e:
+        return 0, f"SGT 読み込みエラー: {e}"
+    finally:
+        try:
+            if wb is not None:
+                wb.close()
+        except Exception:
+            pass
+        cleanup_tmp(tmp_path)
+
+    try:
+        rows = json.loads(nittei_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return 0, f"nittei.json 読み込みエラー: {e}"
+
+    # rows を明細No でインデックス化
+    rows_map = {}
+    for r in rows:
+        try:
+            no_int = int(r.get("no", 0) or 0)
+        except (TypeError, ValueError):
+            no_int = 0
+        rows_map[no_int] = r
+
+    # AC/AD/AF/qty/done/kyukyu/shohi/zansu を上書き（SGT が正）
+    updated = 0
+    for no_int, r in rows_map.items():
+        if no_int in sgt_map:
+            sg = sgt_map[no_int]
+            changed = False
+            # 日付フィールド：空値はスキップ
+            for key in ("ac", "ad", "af"):
+                val = sg[key]
+                if val and r.get(key) != val:
+                    r[key] = val
+                    changed = True
+            # 数値フィールド：None 以外はすべて上書き（0 も有効値）
+            for key in ("qty", "done", "kyukyu", "shohi", "zansu"):
+                val = sg[key]
+                if val is not None and r.get(key) != val:
+                    r[key] = val
+                    changed = True
+            if changed:
+                updated += 1
+
+    # SGT の行順に並び替え（SGTにない行は末尾）
+    sgt_set = set(sgt_order)
+    sorted_rows = (
+        [rows_map[no] for no in sgt_order if no in rows_map]
+        + [r for no, r in rows_map.items() if no not in sgt_set]
+    )
+
+    try:
+        nittei_path.write_text(
+            json.dumps(sorted_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        return 0, f"nittei.json 書き込みエラー: {e}"
+
+    return updated, f"{updated} 件を SGT から同期しました"
+
+
+def load_nittei_rows() -> list:
+    nittei_path = BASE_DIR / "nittei.json"
+    if not nittei_path.exists():
+        # フォールバック：app.pyと同階層も探す
+        nittei_path = Path(__file__).resolve().parent / "nittei.json"
+    if not nittei_path.exists():
+        return []
+    try:
+        with open(nittei_path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        st.error(f"nittei.json 読み込みエラー: {e}")
+        return []
+
+# ══════════════════════════════════════════════════════════
+# 樹脂指示書フォルダ スキャン＆抽出
+# ══════════════════════════════════════════════════════════
+@st.cache_data(ttl=60, show_spinner="樹脂指示書 スキャン中...")
+# ══════════════════════════════════════════════════════════
+# 指示書スキャン用 mtime キャッシュ（jushi_scan_cache.json）
+# ══════════════════════════════════════════════════════════
+def _jushi_cache_default(obj):
+    """datetime/date を JSON シリアライズ"""
+    from datetime import datetime as _dt, date as _d
+    if isinstance(obj, _dt):
+        return {"__dt__": obj.isoformat()}
+    if isinstance(obj, _d):
+        return {"__d__": obj.isoformat()}
+    raise TypeError(f"Not serializable: {type(obj)}")
+
+def _jushi_cache_hook(d: dict):
+    """JSON デシリアライズ時に datetime を復元"""
+    from datetime import datetime as _dt, date as _d
+    if "__dt__" in d:
+        return _dt.fromisoformat(d["__dt__"])
+    if "__d__" in d:
+        return _d.fromisoformat(d["__d__"])
+    return d
+
+def _jushi_cache_load() -> dict:
+    if not JUSHI_CACHE_PATH.exists():
+        return {}
+    try:
+        with open(JUSHI_CACHE_PATH, encoding="utf-8") as _f:
+            return json.load(_f, object_hook=_jushi_cache_hook)
+    except Exception:
+        return {}
+
+def _jushi_cache_save(cache: dict) -> None:
+    try:
+        with open(JUSHI_CACHE_PATH, "w", encoding="utf-8") as _f:
+            json.dump(cache, _f, ensure_ascii=False, default=_jushi_cache_default)
+    except Exception:
+        pass
+
+def _scan_jushi_raw(vfdb: dict) -> list:
+    """
+    樹脂指示書フォルダを全件スキャン。
+    ファイルのmtimeが変わっていなければ jushi_scan_cache.json から読み込み、
+    xlsx を開く処理をスキップする。
+    フィルタなし版。scan_jushi() から呼び出す。
+    """
+    results = []
+    if not JUSHI_DIR.exists():
+        return results
+
+    # ─── キャッシュ読み込み ───
+    cache     = _jushi_cache_load()   # {fname:mtime: [records]}
+    new_cache = {}
+    cache_updated = False
+
+    two_months_ago = datetime.now() - timedelta(days=60)
+
+    for fpath in sorted(JUSHI_DIR.glob("*.xlsx")):
+        if fpath.name.startswith("~$"):
+            continue
+        fname = fpath.name
+
+        # ─── リネーム（YYMMDD_ 形式でなければ）───
+        if not (len(fname) >= 7 and fname[:6].isdigit() and fname[6] == "_"):
+            try:
+                cdate    = datetime.fromtimestamp(fpath.stat().st_ctime)
+                new_name = cdate.strftime("%y%m%d") + "_" + fname
+                new_path = fpath.parent / new_name
+                if not new_path.exists():
+                    fpath.rename(new_path)
+                fpath = new_path
+                fname = new_path.name
+            except Exception:
+                continue
+
+        # ─── 日付フィルタ（2ヶ月以内）───
+        try:
+            fdate = datetime(2000 + int(fname[:2]), int(fname[2:4]), int(fname[4:6]))
+            if fdate < two_months_ago:
+                continue
+        except Exception:
+            continue
+
+        # ─── mtimeキャッシュチェック ───
+        try:
+            mtime = round(fpath.stat().st_mtime, 3)
+        except Exception:
+            mtime = 0.0
+        cache_key = f"{fname}:{mtime}"
+
+        if cache_key in cache:
+            # キャッシュヒット：xlsx を開かずにレコードを再利用
+            # vfdb は安価なdict引き当てなので毎回マージする
+            cached_recs = cache[cache_key]
+            for rec in cached_recs:
+                code = rec.get("品目コード", "")
+                vf   = vfdb.get(str(code), {}) if code else {}
+                rec["品名"]      = vf.get("品名",      rec.get("品名",      ""))
+                rec["単価"]      = vf.get("単価",      rec.get("単価",      ""))
+                rec["切断工数"]  = vf.get("切断工数",  rec.get("切断工数",  ""))
+                rec["業態"]      = vf.get("業態",      rec.get("業態",      ""))
+                rec["梱包"]      = vf.get("梱包",      rec.get("梱包",      ""))
+                rec["取数"]      = vf.get("取数",      rec.get("取数",      ""))
+                rec["温度換算"]  = vf.get("温度換算",  rec.get("温度換算",  ""))
+                rec["下限公差"]  = vf.get("下限公差",  rec.get("下限公差",  ""))
+                rec["上限公差"]  = vf.get("上限公差",  rec.get("上限公差",  ""))
+                rec["梱包方法"]  = vf.get("梱包方法",  rec.get("梱包方法",  ""))
+                rec["梱包箱"]    = vf.get("梱包箱",    rec.get("梱包箱",    ""))
+                rec["切断寸法"]  = vf.get("切断寸法",  rec.get("切断寸法",  ""))
+            results.extend(cached_recs)
+            new_cache[cache_key] = cached_recs
+            continue   # xlsx を開かずに次のファイルへ
+
+        # ─── xlsx 読み取り（57行ごとに1案件）───
+        wb = tmp_path = None
+        file_records = []
+        try:
+            wb, tmp_path = open_workbook_safely(
+                fpath, data_only=True, read_only=True)
+            ws = wb.worksheets[0]
+            row_offset = 0
+            page       = 1
+
+            while True:
+                b3  = ws.cell(3  + row_offset, 2).value
+                b5  = ws.cell(5  + row_offset, 2).value
+                b7  = ws.cell(7  + row_offset, 2).value
+                b10 = ws.cell(10 + row_offset, 2).value
+                h10 = ws.cell(10 + row_offset, 8).value
+
+                if not any([b3, b5, b7, b10, h10]):
+                    break
+
+                vf = vfdb.get(str(b3), {}) if b3 else {}
+
+                file_records.append({
+                    "file_path"  : str(fpath),
+                    "ファイル名" : fname,
+                    "指図書No"   : str(b7)  if b7  else "",
+                    "品目番号"   : str(b5)  if b5  else "",
+                    "品目コード" : str(b3)  if b3  else "",
+                    "品名"       : vf.get("品名",     ""),
+                    "納品日"     : b10,
+                    "確定日程"   : None,
+                    "数量"       : h10,
+                    "ページ"     : page,
+                    "単価"       : vf.get("単価",     ""),
+                    "切断工数"   : vf.get("切断工数", ""),
+                    "業態"       : vf.get("業態",     ""),
+                    "梱包"       : vf.get("梱包",     ""),
+                    "取数"       : vf.get("取数",     ""),
+                    "温度換算"   : vf.get("温度換算", ""),
+                    "下限公差"   : vf.get("下限公差", ""),
+                    "上限公差"   : vf.get("上限公差", ""),
+                    "梱包方法"   : vf.get("梱包方法", ""),
+                    "梱包箱"     : vf.get("梱包箱",   ""),
+                    "切断寸法"   : vf.get("切断寸法", ""),
+                    "起票FLG"    : False,
+                    "ステータス" : "新規",
+                    "source"     : "scan",
+                })
+
+                row_offset += 57
+                page       += 1
+
+        except Exception:
+            pass  # 読み取り失敗は無視（開きっぱなし等）
+        finally:
+            try:
+                if wb is not None:
+                    wb.close()
+            except Exception:
+                pass
+            cleanup_tmp(tmp_path)
+
+        if file_records:
+            new_cache[cache_key] = file_records
+            cache_updated = True
+        results.extend(file_records)
+
+    # ─── キャッシュ保存（変化があった場合のみ）───
+    if cache_updated or set(new_cache.keys()) != set(cache.keys()):
+        _jushi_cache_save(new_cache)
+
+    return results
+
+
+def scan_jushi(vfdb: dict, existing_page_keys: set) -> list:
+    """キャッシュ済みスキャン結果から既存を除外して返す（ファイルパス+ページ番号単位）"""
+    if not JUSHI_DIR.exists():
+        st.warning(f"樹脂指示書フォルダが見つかりません: {JUSHI_DIR}")
+        return []
+    all_recs = _scan_jushi_raw(vfdb)
+    return [r for r in all_recs
+            if f"{normalize_path(r['file_path'])}#{r.get('ページ', 1)}" not in existing_page_keys]
+
+# ══════════════════════════════════════════════════════════
+# サイドバー
+# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+# ページ状態管理（クエリパラメータ方式）
+# ══════════════════════════════════════════════════════════
+PAGES = ["日程表", "依頼書保管", "データベース", "加工記録", "在庫管理", "配送", "請求", "帳票保管庫"]
+
+# ── ページ状態管理 ──
+if "page_sel" not in st.session_state:
+    st.session_state.page_sel = "日程表"
+page_sel = st.session_state.page_sel
+
+# ── ナビボタン（st.button で確実に動作）──
+# JSでフッターに移動するため元位置は非表示になる
+_nav_cols = st.columns(len(PAGES))
+for _nc, _p in zip(_nav_cols, PAGES):
+    with _nc:
+        if st.button(_p, key=f"tab_{_p}", use_container_width=True):
+            st.session_state.page_sel = _p
+            st.rerun()
+
+# ── CSS + JS：ナビをフッターに移動・Claudeオレンジ化 ──
+_active_page = json.dumps(page_sel)
+_pages_json   = json.dumps(PAGES)
+st.markdown(f"""
+<style>
+[data-testid="stSidebar"] {{ display: none !important; }}
+[data-testid="collapsedControl"] {{ display: none !important; }}
+.block-container {{ padding-left: 2rem !important; max-width: 100% !important; padding-bottom: 44px !important; }}
+#sgt-status {{ position:fixed; bottom:9px; right:14px; font-size:11px; color:#555; z-index:10000; }}
+#_sgt_nav_bar {{
+  position: fixed; bottom: 0; left: 0; right: 0; height: 36px;
+  background: #1a1a1a; border-top: 2px solid #444;
+  display: flex; align-items: center; padding: 0 8px; gap: 3px;
+  z-index: 9999; box-sizing: border-box;
+}}
+#_sgt_nav_bar button {{
+  flex: 1 1 0; min-width: 0; height: 26px;
+  color: #fff !important;
+  border: none !important; border-radius: 4px !important;
+  font-size: 11px !important; font-weight: 600 !important;
+  cursor: pointer !important; padding: 2px 4px !important;
+  white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important;
+  transition: background 0.15s;
+}}
+</style>
+<div id="_sgt_nav_bar"></div>
+<div id="sgt-status">SGT: {"接続" if SGT_PATH.exists() else "未接続"}</div>
+""", unsafe_allow_html=True)
+
+# st.markdown の <script> は新しい Streamlit では実行されないため
+# components.html で親ページの DOM を操作する方式に変更
+import streamlit.components.v1 as _nav_comp
+_nav_comp.html(f"""<script>
+(function(){{
+  const doc = window.parent.document;
+  const ACTIVE = {_active_page};
+  const PAGES  = {_pages_json};
+  const CLR_ON  = '#b85e3a';
+  const CLR_OFF = '#555';
+  const CLR_HOV = '#d97757';
+
+  function buildNav() {{
+    const bar = doc.getElementById('_sgt_nav_bar');
+    if (!bar) return;
+
+    // ページ名と一致するst.buttonを探す
+    const stBtns = {{}};
+    doc.querySelectorAll('button').forEach(b => {{
+      const t = b.textContent.trim();
+      if (PAGES.includes(t) && !b.closest('#_sgt_nav_bar')) stBtns[t] = b;
+    }});
+    if (Object.keys(stBtns).length < PAGES.length) return;
+
+    // 元のst.columns行を非表示
+    const firstHb = stBtns[PAGES[0]]?.closest('[data-testid="stHorizontalBlock"]');
+    if (firstHb) firstHb.style.cssText = 'display:none!important';
+
+    // バーに既にボタンがあれば色とクリックハンドラを更新（rerun後に参照が切れるため毎回差し替え）
+    const existing = bar.querySelectorAll('button');
+    if (existing.length === PAGES.length) {{
+      existing.forEach((b, i) => {{
+        const p = PAGES[i];
+        b.style.background = (b.textContent.trim() === ACTIVE) ? CLR_ON : CLR_OFF;
+        b.onclick = () => {{ stBtns[p]?.click(); }};
+      }});
+      return;
+    }}
+
+    // 初回：バーにボタンを追加
+    bar.innerHTML = '';
+    PAGES.forEach(p => {{
+      const btn = doc.createElement('button');
+      btn.textContent = p;
+      btn.style.background = (p === ACTIVE) ? CLR_ON : CLR_OFF;
+      btn.addEventListener('mouseenter', () => {{ btn.style.background = CLR_HOV; }});
+      btn.addEventListener('mouseleave', () => {{ btn.style.background = (btn.textContent.trim() === ACTIVE) ? CLR_ON : CLR_OFF; }});
+      btn.addEventListener('click', () => {{ stBtns[p]?.click(); }});
+      bar.appendChild(btn);
+    }});
+  }}
+
+  const obs = new MutationObserver(buildNav);
+  obs.observe(doc.body, {{childList: true, subtree: true}});
+  setTimeout(buildNav, 200);
+  setTimeout(buildNav, 800);
+}})();
+</script>""", height=0, scrolling=False)
+
+page_sel = st.session_state.page_sel
+
+# SGT.xlsm 未接続チェックは無効化（現場端末はSGTなしで運用）
+
+# ══════════════════════════════════════════════════════════
+# 日程表ページ
+# ══════════════════════════════════════════════════════════
+if page_sel.startswith("日程表"):
+
+    import json as _json
+    import re as _re
+
+    # 2026年祝日（簡易ハードコード）
+    HOLIDAYS_2026 = {
+        "2026-01-01","2026-01-12","2026-02-11","2026-02-23",
+        "2026-03-20","2026-04-29","2026-05-03","2026-05-04",
+        "2026-05-05","2026-05-06","2026-07-20","2026-08-11",
+        "2026-09-21","2026-09-22","2026-10-12","2026-11-03",
+        "2026-11-23","2026-12-23",
+    }
+
+    def gen_working_days(base_date, n_days=40):
+        WEEK = ["月","火","水","木","金","土","日"]
+        result = []
+        d = base_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = d + timedelta(days=n_days)
+        while d < end:
+            if d.weekday() < 5 and d.strftime("%Y-%m-%d") not in HOLIDAYS_2026:
+                result.append([d.strftime("%m/%d"), WEEK[d.weekday()]])
+            d += timedelta(days=1)
+        return result
+
+    nittei_rows  = load_nittei_rows()
+
+    # 依頼書保管の品名・工数で上書き（SGT日程シートのS列・Y列より優先）
+    if "orders" in st.session_state:
+        _orders_map = {}
+        for _o in st.session_state.orders:
+            _k = _o.get("指図書No", "")
+            if _k:
+                _orders_map[_k] = _o
+        for _nr in nittei_rows:
+            _o = _orders_map.get(_nr["no"])
+            if _o:
+                if _o.get("品名"):
+                    _nr["nm"] = _o["品名"]
+                # 総工数 = 注文数 ÷ 切断工数（残数量で割らない）
+                _qty  = float(_o.get("数量") or 0)
+                _h = calc_hours(_qty, _o.get("切断工数"))
+                if _h is not None:
+                    _nr["hours"] = _h
+                # 期限(af)が未設定なら依頼書ページの期限列（納品日）で補完
+                if not _nr.get("af"):
+                    _af = fmt_date(_o.get("納品日"))
+                    if _af:
+                        _nr["af"] = _af
+            else:
+                # 依頼書データなし → hours は総工数のまま保持（書き換えない）
+                pass
+    today        = datetime.today()
+    working_days = gen_working_days(today, n_days=60)
+    today_str    = today.strftime("%m/%d")
+    today_idx    = next((i for i, d in enumerate(working_days) if d[0] == today_str), 0)
+
+    rows_js = _json.dumps(nittei_rows,  ensure_ascii=False)
+    days_js = _json.dumps(working_days, ensure_ascii=False)
+
+    html_src = (Path(__file__).resolve().parent / "日程ページ_試作.html").read_text(encoding="utf-8")
+    html_src = _re.sub(r"const days=\[.*?\];",  f"const days={days_js};",  html_src, flags=_re.DOTALL)
+    html_src = _re.sub(r"TODAY_DAY=\d+",          f"TODAY_DAY={today_idx}",  html_src)
+    html_src = _re.sub(r"let rows=\[.*?\];",     f"let rows={rows_js};",    html_src, flags=_re.DOTALL)
+    vfdb_spec_js = _json.dumps(build_vfdb_spec_by_name(), ensure_ascii=False)
+    html_src = _re.sub(r"const VFDB_SPEC = \{[^\n]*\};", lambda _m: "const VFDB_SPEC = " + vfdb_spec_js + ";", html_src)
+
+    if not nittei_rows:
+        st.info("日程シートにデータがありません。SGT.xlsm の「日程」シートを確認してください。")
+    else:
+        import streamlit.components.v1 as components
+        # 行数に応じてiframe高さを動的計算（ヘッダー96px + 行30px × 件数 + 余白）
+        # 20行分 + ヘッダー + 凡例 + ボトムタブ分
+        ROW_H    = 32
+        HEADER_H = 96   # headerとlegendの合計
+        VISIBLE  = 20   # 表示行数
+        iframe_h = HEADER_H + ROW_H * VISIBLE + 20  # コンテンツ高さ（上限値）
+        # モニター高さに合わせてiframe高さを自動調整するJSを注入
+        # screen.height = 実際のモニター高さ、160px = Streamlitのヘッダー等のChrome分
+        _autosize_js = f"""<script>
+(function(){{
+  function _setH(){{
+    var content_h = {iframe_h};
+    var screen_limit = window.screen.height - 160;
+    var target = Math.min(content_h, screen_limit);
+    window.parent.postMessage({{type:'streamlit:setFrameHeight', height: target}}, '*');
+  }}
+  window.addEventListener('load', _setH);
+  window.addEventListener('resize', _setH);
+}})();
+</script>"""
+        html_src = html_src.replace('</body>', _autosize_js + '</body>')
+        st.markdown("""<script>
+(function(){
+  if(window._nitteiBeforeunloadSet) return;
+  window._nitteiBeforeunloadSet = true;
+  window._nitteiDirty = false;
+  window.addEventListener('message', function(e){
+    if(e.data && e.data.type === 'nittei_dirty') window._nitteiDirty = e.data.dirty;
+  });
+  window.addEventListener('beforeunload', function(e){
+    if(window._nitteiDirty){ e.preventDefault(); e.returnValue=''; }
+  });
+})();
+</script>""", unsafe_allow_html=True)
+        components.html(html_src, height=iframe_h, scrolling=False)
+
+    st.stop()
+
+# ══════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════
+# データベースページ
+# ══════════════════════════════════════════════════════════
+if page_sel == "データベース":
+    st.markdown("## データベース")
+
+    _db_html = (Path(__file__).resolve().parent / "db_table.html").read_text(encoding="utf-8")
+    import streamlit.components.v1 as _components
+    _components.html(_db_html, height=700, scrolling=False)
+    st.stop()
+
+
+
+# ══════════════════════════════════════════════════════════
+# 加工記録ページ
+# ══════════════════════════════════════════════════════════
+if page_sel == "加工記録":
+    st.markdown("## 加工記録")
+
+    if st.button("再読み込み", key="kakou_reload"):
+        st.rerun()
+
+    try:
+        all_kakou = _load_all_cases(BASE_DIR)
+    except Exception as e:
+        st.error(f"加工記録の読み込みエラー: {e}")
+        st.stop()
+    if not all_kakou:
+        st.info("まだ加工記録がありません。日程ページの明細Noをタップして記録を追加してください。")
+        st.stop()
+    # 「完了」ボタンが押された記録のみ履歴に表示する（下書き状態は対象外）
+    all_kakou = [r for r in all_kakou if r.get("kanryo") is True]
+    if not all_kakou:
+        st.info("まだ完了した加工記録がありません。記録入力画面で「完了」を押すとここに表示されます。")
+        st.stop()
+
+    # メトリクス
+    total_recs   = len(all_kakou)
+    total_kakou  = sum(sum(d.get("kakou_su", 0) for d in r.get("daily", [])) for r in all_kakou)
+    total_furyou = sum(sum(r.get("furyou", {}).values()) for r in all_kakou if r.get("furyou"))
+
+    mc1, mc2, mc3 = st.columns(3)
+    with mc1: st.metric("記録件数", total_recs)
+    with mc2: st.metric("総加工数", f"{total_kakou:,}")
+    with mc3: st.metric("総不良数", f"{total_furyou:,}")
+
+    st.divider()
+
+    # 一覧テーブル（明細Noクリックで記入ページを開く）
+    import urllib.parse as _up
+    import streamlit.components.v1 as _kcomp
+
+    _rows_html = ""
+    for rec in all_kakou:
+        daily   = rec.get("daily", [])
+        kakou_s = sum(d.get("kakou_su", 0) for d in daily)
+        furyou  = rec.get("furyou", {})
+        f_total = sum(furyou.values()) if furyou else 0
+        _meta_obj = {"no": rec.get("meisai_no",""), "nm": rec.get("hinmei",""),
+                     "qty": rec.get("qty", 0), "grp": rec.get("grp","")}
+        _meta_q = _up.quote(json.dumps(_meta_obj, ensure_ascii=False))
+        _url = f"http://localhost:{_KAKOU_PORT}/ui?meta={_meta_q}"
+        _rows_html += (
+            f'<tr class="kr" onclick="window.open(\'{_url}\',\'_blank\')">'
+            f'<td class="td-no">{rec.get("meisai_no","")}</td>'
+            f'<td>{rec.get("hinmei","")}</td>'
+            f'<td>{rec.get("grp","")}</td>'
+            f'<td>{rec.get("sakusha","")}</td>'
+            f'<td>{rec.get("kakou_lot","")}</td>'
+            f'<td style="text-align:right">{rec.get("hako_su",0)}</td>'
+            f'<td style="text-align:right">{kakou_s:,}</td>'
+            f'<td style="text-align:right">{f_total}</td>'
+            f'<td>{(rec.get("updated_at","") or "")[:16]}</td>'
+            f'</tr>'
+        )
+
+    _table_html = f"""<style>
+      body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
+      table{{border-collapse:collapse;width:100%;}}
+      th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 8px;border-bottom:2px solid #444;
+          text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
+      .kr{{border-bottom:1px solid #2a2a2a;cursor:pointer;}}
+      .kr:hover td{{background:rgba(255,140,40,0.12)!important;}}
+      td{{padding:5px 8px;border-right:1px solid #2a2a2a;white-space:nowrap;}}
+      .td-no{{color:#d97757;font-weight:600;text-decoration:underline;}}
+    </style>
+    <div style="overflow:auto;max-height:540px;">
+    <table>
+      <thead><tr>
+        <th>明細No ↗</th><th>品名</th><th>伝票</th><th>作業者</th>
+        <th>加工Lot</th><th>箱数</th><th>加工数計</th><th>不良計</th><th>更新日時</th>
+      </tr></thead>
+      <tbody>{_rows_html}</tbody>
+    </table></div>"""
+    _kcomp.html(_table_html, height=600, scrolling=False)
+
+    # 詳細展開（expander）
+    st.divider()
+    st.markdown("#### 詳細")
+    for rec in all_kakou:
+        no   = rec.get("meisai_no", "")
+        nm   = rec.get("hinmei", "")
+        with st.expander(f"明細No {no}  {nm}", expanded=False):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown(f"**作業者**　{rec.get('sakusha','')}  ")
+                st.markdown(f"**加工Lot**　{rec.get('kakou_lot','')}  ")
+            with c2:
+                st.markdown(f"**箱数**　{rec.get('hako_su','')}")
+                st.markdown(f"**入重日**　{rec.get('irejubi','')}  入重数　{rec.get('ireju_su','')}")
+            with c3:
+                st.markdown(f"**備考**　{rec.get('biko','')}")
+            # 作業明細
+            daily = rec.get("daily", [])
+            if daily:
+                df_d = pd.DataFrame(daily).rename(columns={
+                    "sakugyobi":"作業日","ondo":"温度(℃)",
+                    "kakou_su":"加工数","hazai":"端材使用"
+                })
+                st.dataframe(df_d, use_container_width=True, hide_index=True)
+            # 不良内訳
+            fu = rec.get("furyou", {})
+            fu_map = {"kizu":"キズ","kubomi":"凹み","imono":"異物","kake":"欠け",
+                      "meyani":"メヤニ","peko":"ペコツキ","osen":"汚損",
+                      "keijo":"形状異常","sonota":"その他"}
+            fu_rows = [{lbl: fu.get(k, 0) for k, lbl in fu_map.items()}]
+            fu_rows[0]["合計"] = sum(fu.get(k,0) for k in fu_map)
+            st.dataframe(pd.DataFrame(fu_rows), use_container_width=True, hide_index=True)
+
+    st.stop()
+
+
+# ══════════════════════════════════════════════════════════
+# 請求ページ
+# ══════════════════════════════════════════════════════════
+if page_sel == "請求":
+    import re as _re_s
+    import json as _json_s
+    import streamlit.components.v1 as _scomp
+
+    _seikyuu_html_path = Path(__file__).resolve().parent / "seikyuu.html"
+    if not _seikyuu_html_path.exists():
+        st.error("seikyuu.html が見つかりません。VFAPフォルダに配置してください。")
+        st.stop()
+
+    # nittei データ
+    _seikyuu_nittei = load_nittei_rows()
+
+    # vfdb データ
+    _up_s = os.environ.get("USERPROFILE", "")
+    _vfdb_data = []
+    for _vp in [
+        BASE_DIR / "vfdb.json",
+        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up_s else []),
+        Path(__file__).resolve().parent / "vfdb.json",
+    ]:
+        if _vp.exists():
+            try:
+                _vfdb_data = json.loads(_vp.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+            break
+
+    _nittei_js = _json_s.dumps(_seikyuu_nittei, ensure_ascii=False)
+    _vfdb_js   = _json_s.dumps(_vfdb_data,      ensure_ascii=False)
+
+    _html_src = _seikyuu_html_path.read_text(encoding="utf-8")
+    _html_src = _re_s.sub(r"let NITTEI_ROWS = \[\];",
+                           f"let NITTEI_ROWS = {_nittei_js};", _html_src)
+    _html_src = _re_s.sub(r"const VFDB_ROWS = \[\];",
+                           f"const VFDB_ROWS = {_vfdb_js};",  _html_src)
+
+    _row_count = len(_seikyuu_nittei) if _seikyuu_nittei else 0
+    _iframe_h  = max(700, 100 + 34 * _row_count + 300)
+
+    if not _seikyuu_nittei:
+        st.info("日程データがありません。SGT.xlsm を確認してください。")
+    else:
+        _html_src = _html_src.replace("</body>", _CHOHYO_INJECT_SEIKYUU + "</body>", 1)
+        _scomp.html(_html_src, height=_iframe_h, scrolling=True)
+
+    st.stop()
+
+
+# ══════════════════════════════════════════════════════════
+# 在庫管理ページ
+# ══════════════════════════════════════════════════════════
+if page_sel == "在庫管理":
+    import math as _math
+    import re as _re_z, unicodedata as _ud_z
+    import json as _json_z
+    import streamlit.components.v1 as _kcomp_z
+
+    _nittei_rows_z = load_nittei_rows()
+    _vfdb_spec_z   = build_vfdb_spec_by_name()
+
+    def _norm_z(s):
+        return _re_z.sub(r"\s+", "", _ud_z.normalize("NFKC", str(s if s is not None else "")))
+
+    _hako_rows = []
+    for _r in _nittei_rows_z:
+        _nm   = _r.get("nm", "")
+        _qty  = _r.get("qty") or 0
+        _af   = _r.get("ac") or ""   # AC列（引取日）を使用
+        _done_cnt = _r.get("done") or 0
+        _is_done  = (_done_cnt >= _qty) if _qty > 0 else False
+        _spec = _vfdb_spec_z.get(_norm_z(_nm), {})
+        _hako = _spec.get("hako") or None
+        _irisu_raw = _spec.get("irisu")
+        try:
+            _irisu_n = float(_irisu_raw) if _irisu_raw else None
+        except (TypeError, ValueError):
+            _irisu_n = None
+        _shosu = int(_math.ceil(_qty / _irisu_n)) if _irisu_n and _irisu_n > 0 else None
+        _hako_rows.append({
+            "nm":    _nm,
+            "qty":   _qty,
+            "af":    _af,
+            "hako":  _hako,
+            "shosu": _shosu,
+            "done":  _is_done,
+        })
+
+    _hako_html = (Path(__file__).resolve().parent / "hako_shiyo.html").read_text(encoding="utf-8")
+    _hako_js   = _json_z.dumps(_hako_rows, ensure_ascii=False)
+    _hako_html = _hako_html.replace("const HAKO_ROWS = [];", "const HAKO_ROWS = " + _hako_js + ";")
+    _kcomp_z.html(_hako_html, height=750, scrolling=True)
+    st.stop()
+
+# ====================================================
+# 配送ページ
+# ====================================================
+if page_sel == "配送":
+    import json as _json_h
+    import streamlit.components.v1 as _kcomp_h
+
+    _nittei_h = load_nittei_rows()
+    _up_h = os.environ.get("USERPROFILE", "")
+    _vfdb_path_h = next(
+        (p for p in [
+            BASE_DIR / "vfdb.json",
+            *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up_h else []),
+            Path(__file__).resolve().parent / "vfdb.json",
+        ] if p.exists()), None
+    )
+    _vfdb_list_h = (
+        _json_h.loads(_vfdb_path_h.read_text("utf-8")) if _vfdb_path_h else []
+    )
+    _haiso_html = (
+        (Path(__file__).resolve().parent / "haiso.html").read_text(encoding="utf-8")
+    )
+    _haiso_html = _haiso_html.replace(
+        "const NITTEI = [];",
+        "const NITTEI = " + _json_h.dumps(_nittei_h, ensure_ascii=False) + ";"
+    )
+    _haiso_html = _haiso_html.replace(
+        "const VFDB_LIST = [];",
+        "const VFDB_LIST = " + _json_h.dumps(_vfdb_list_h, ensure_ascii=False) + ";"
+    )
+    # ── iframe内に「保管庫に保存」ボタンを注入（表示中の週をそのままPDF化）──
+    _haiso_html = _haiso_html.replace("</body>", _CHOHYO_INJECT_HAISO + "</body>", 1)
+    _kcomp_h.html(_haiso_html, height=900, scrolling=True)
+    st.stop()
+
+# ══════════════════════════════════════════════════════════
+# 帳票保管庫ページ（生成済みPDFを年/月で閲覧）
+# ══════════════════════════════════════════════════════════
+if page_sel == "帳票保管庫":
+    st.markdown("## 帳票保管庫")
+    _kinds = list(CHOHYO_DIRS.keys())
+    _kind  = st.radio("種類", _kinds, horizontal=True, key="ar_kind")
+    _kdir  = CHOHYO_DIRS[_kind]
+    _year_only = _kind in CHOHYO_BY_YEAR_ONLY
+    try:
+        _kdir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    _cc1, _cc2 = st.columns([3, 7])
+    with _cc1:
+        if st.button("📂 このフォルダを開く", use_container_width=True, key="ar_openroot"):
+            try:
+                os.startfile(str(_kdir))
+            except Exception as _e:
+                st.error(f"開けませんでした: {_e}")
+
+    _years = (sorted([d.name for d in _kdir.iterdir() if d.is_dir()], reverse=True)
+              if _kdir.exists() else [])
+    if not _years:
+        st.info(f"まだ {_kind} の保管はありませんわ。")
+        st.stop()
+    _y    = st.selectbox("年", _years, key="ar_year")
+    _ydir = _kdir / _y
+
+    if _year_only:
+        _target = _ydir
+    else:
+        _months = (sorted([d.name for d in _ydir.iterdir() if d.is_dir()], reverse=True)
+                   if _ydir.exists() else [])
+        if not _months:
+            st.info("この年にはまだファイルがありませんわ。")
+            st.stop()
+        _m      = st.selectbox("月", _months, key="ar_month")
+        _target = _ydir / _m
+
+    _pdfs = sorted(_target.glob("*.pdf")) if _target.exists() else []
+    if not _pdfs:
+        st.info("PDFが見つかりませんわ。")
+        st.stop()
+
+    # ── アプリ内PDFビューア（選択中を上部にプレビュー）──
+    _vp = st.session_state.get("chohyo_view_pdf")
+    if _vp and Path(_vp).exists():
+        import urllib.parse as _ulib
+        import streamlit.components.v1 as _viewer_comp
+        _vc1, _vc2 = st.columns([8, 2])
+        with _vc1:
+            st.markdown(f"**📖 プレビュー:** {Path(_vp).name}")
+        with _vc2:
+            if st.button("✕ 閉じる", key="ar_view_close", use_container_width=True):
+                st.session_state.pop("chohyo_view_pdf", None)
+                st.rerun()
+        _src = "http://localhost:8503/serve_pdf?p=" + _ulib.quote(str(_vp))
+        _viewer_html = """
+<div id="pdfwrap" style="width:100%;max-height:800px;overflow:auto;background:#1a1a1a;padding:6px;border-radius:6px;"></div>
+<div id="pdfmsg" style="color:#aaa;font-size:12px;padding:6px;">読み込み中…</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function(){
+  var SRC = "__SRC__";
+  function fail(m){ var e=document.getElementById('pdfmsg'); if(e) e.textContent='表示できませんでした: '+m+'（「開く」かDLで確認してな）'; }
+  if(!window['pdfjsLib']){ fail('pdf.js読込失敗（オフライン？）'); return; }
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  fetch(SRC).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+    .then(function(buf){ return pdfjsLib.getDocument({data:buf}).promise; })
+    .then(function(pdf){
+       document.getElementById('pdfmsg').textContent = pdf.numPages+'ページ';
+       var wrap=document.getElementById('pdfwrap'); var chain=Promise.resolve();
+       for(var i=1;i<=pdf.numPages;i++){ (function(n){
+         chain=chain.then(function(){ return pdf.getPage(n).then(function(page){
+           var vp=page.getViewport({scale:1.4});
+           var c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
+           c.style.cssText='display:block;width:100%;margin:0 auto 8px;background:#fff;border:1px solid #333;border-radius:4px;';
+           wrap.appendChild(c);
+           return page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+         });});
+       })(i); }
+       return chain;
+    })
+    .catch(function(e){ fail(e.message||String(e)); });
+})();
+</script>
+""".replace("__SRC__", _src)
+        _viewer_comp.html(_viewer_html, height=860, scrolling=True)
+        st.markdown("---")
+
+    st.caption(f"{len(_pdfs)} 件")
+    for _i, _pdf in enumerate(_pdfs):
+        _c1, _c2, _c3, _c4 = st.columns([6, 2, 2, 2])
+        with _c1:
+            st.write(f"📄 {_pdf.name}")
+        with _c2:
+            if st.button("👁 表示", key=f"ar_view_{_i}", use_container_width=True):
+                st.session_state["chohyo_view_pdf"] = str(_pdf)
+                st.rerun()
+        with _c3:
+            if st.button("開く", key=f"ar_open_{_i}", use_container_width=True):
+                try:
+                    os.startfile(str(_pdf))
+                except Exception as _e:
+                    st.error(f"開けませんでした: {_e}")
+        with _c4:
+            with open(_pdf, "rb") as _f:
+                st.download_button("DL", data=_f, file_name=_pdf.name,
+                                   mime="application/pdf",
+                                   key=f"ar_dl_{_i}", use_container_width=True)
+    st.stop()
+
+# 準備中ページ
+# ══════════════════════════════════════════════════════════
+if page_sel != "依頼書保管":
+    st.markdown(f"## {page_sel}")
+    st.info("このモジュールは準備中ですわ〜")
+    st.stop()
+
+# ══════════════════════════════════════════════════════════
+# 依頼書保管 メイン
+# ══════════════════════════════════════════════════════════
+st.markdown("## 依頼書保管")
+
+# ─── データ初期化 ───
+vfdb        = load_vfdb()
+status_dict = load_status()
+
+if "orders" not in st.session_state:
+    # 全件スキャン（seen_norms は「指示書取得」ボタン専用）
+    records = _scan_jushi_raw(vfdb) if JUSHI_DIR.exists() else []
+    # 削除済みを除外
+    _deleted_keys = load_deleted_keys()
+    records = [r for r in records
+               if f"{normalize_path(r['file_path'])}#{r.get('ページ', '')}" not in _deleted_keys]
+    # 日程シートAD列（納品日）を明細Noで照合してマージ
+    nittei_for_merge = load_nittei_rows()
+    nittei_ad_map = {}
+    for nr in nittei_for_merge:
+        try:
+            nittei_ad_map[int(nr["no"])] = nr["ad"]
+        except (ValueError, TypeError):
+            pass
+    for r in records:
+        try:
+            meisai_int = int(r.get("指図書No", ""))
+            if meisai_int in nittei_ad_map:
+                r["納品日"] = nittei_ad_map[meisai_int]
+        except (ValueError, TypeError):
+            pass
+    # ステータス・起票フラグを JSON から復元
+    for r in records:
+        norm = normalize_path(r["file_path"])
+        key  = f"{norm}#{r.get('ページ', '')}"
+        saved = status_dict.get(key) or status_dict.get(norm) or {}
+        r["ステータス"] = saved.get("status", "新規")
+        r["起票FLG"]   = bool(saved.get("flag", r.get("起票FLG", False)))
+    # nittei.json に既にある案件のステータスを判定（取込済 or 加工済）
+    try:
+        _nittei_map_st = {str(n["no"]): n for n in json.loads(
+            (BASE_DIR / "nittei.json").read_text(encoding="utf-8"))}
+    except Exception:
+        _nittei_map_st = {}
+    for r in records:
+        _n = _nittei_map_st.get(str(r.get("指図書No", "")).strip())
+        if _n:
+            if r.get("ステータス") == "完了":  # 完了済みは上書きしない
+                continue
+            qty  = int(_n.get("qty",  0) or 0)
+            done = int(_n.get("done", 0) or 0)
+            r["ステータス"] = "加工済" if (qty > 0 and done >= qty) else "取込済"
+    # nittei.json の納品日(ad)・期限(af) を 指図書No で照合してマージ
+    _nittei_path = BASE_DIR / "nittei.json"
+    if not _nittei_path.exists():
+        _nittei_path = Path(__file__).resolve().parent / "nittei.json"
+    try:
+        _nittei_list    = json.loads(_nittei_path.read_text(encoding="utf-8"))
+        _nittei_map     = {str(n["no"]).lstrip("0"): n for n in _nittei_list}
+        _nittei_idx_map = {str(n["no"]).lstrip("0"): i for i, n in enumerate(_nittei_list)}
+    except Exception:
+        _nittei_map     = {}
+        _nittei_idx_map = {}
+    for r in records:
+        _no_key = str(r.get("指図書No", "")).lstrip("0")
+        _nittei = _nittei_map.get(_no_key, {})
+        if _nittei:
+            r["_nittei_ad"]  = _nittei.get("ad")
+            r["_nittei_af"]  = _nittei.get("af")
+            r["_nittei_idx"] = _nittei_idx_map.get(_no_key)
+    st.session_state.orders = records
+
+orders: list = st.session_state.orders
+
+# ─── メトリクス計算 ───
+total     = len(orders)
+cnt_new    = sum(1 for r in orders if r.get("ステータス") == "新規")
+cnt_wip    = sum(1 for r in orders if r.get("ステータス") == "処理中")
+cnt_done   = sum(1 for r in orders if r.get("ステータス") == "完了")
+cnt_torikomi = sum(1 for r in orders if r.get("ステータス") == "取込済")
+cnt_kakozu   = sum(1 for r in orders if r.get("ステータス") == "加工済")
+cnt_kitsu  = sum(1 for r in orders if r.get("起票FLG"))
+
+# ─── アクションバー 1行目 ───
+col_a, col_b, col_c, col_d, col_e, col_f = st.columns([2, 2, 2, 2, 2, 2])
+with col_a:
+    scan_btn = st.button("指示書取得", use_container_width=True)
+with col_b:
+    save_btn = st.button("ステータス保存", use_container_width=True)
+with col_c:
+    reload_btn = st.button("SGT再読み込み", use_container_width=True)
+with col_d:
+    all_check_btn = st.button("全チェック", use_container_width=True)
+with col_e:
+    all_uncheck_btn = st.button("全解除", use_container_width=True)
+with col_f:
+    delete_btn = st.button("🗑 削除", use_container_width=True)
+
+# ─── アクションバー 2行目（一括チェック系） ───
+col_g, col_h, col_i, col_j, col_k = st.columns([2, 1, 1, 2, 3])
+with col_g:
+    new_check_btn = st.button("新規を一括チェック", use_container_width=True)
+with col_h:
+    st.markdown('<div style="padding-top:0.35rem;font-size:0.78rem;color:#aaa;">納品日</div>', unsafe_allow_html=True)
+with col_i:
+    date_filter = st.date_input("_", value=None, label_visibility="collapsed", key="date_filter_input")
+with col_j:
+    date_check_btn = st.button("↑日付でチェック", use_container_width=True)
+with col_k:
+    sort_key = st.selectbox(
+        "並替",
+        ["納品日順", "明細No順", "期限順"],
+        label_visibility="collapsed",
+        key="sort_order_sel",
+    )
+
+st.markdown(
+    f'<div style="font-size:0.75rem;display:flex;gap:1.5rem;align-items:center;padding-top:0.25rem;color:var(--text-color);">'
+    f'<span>総件数&nbsp;<b>{total}</b></span>'
+    f'<span>新規&nbsp;<b>{cnt_new}</b></span>'
+    f'<span>処理中&nbsp;<b>{cnt_wip}</b></span>'
+    f'<span>完了&nbsp;<b>{cnt_done}</b></span>'
+    f'<span>取込済&nbsp;<b>{cnt_torikomi}</b></span>'
+    f'<span>加工済&nbsp;<b>{cnt_kakozu}</b></span>'
+    f'<span>起票済&nbsp;<b>{cnt_kitsu}</b></span>'
+    f'</div>',
+    unsafe_allow_html=True
+)
+
+# ─── SGT 再読み込み ───
+if reload_btn:
+    st.cache_data.clear()
+    if "orders" in st.session_state:
+        del st.session_state["orders"]
+    st.rerun()
+
+# ─── 全チェック ───
+if all_check_btn:
+    for r in orders:
+        r["起票FLG"] = True
+    st.session_state.orders = orders
+
+# ─── 新規を一括チェック ───
+if new_check_btn:
+    cnt_new_checked = 0
+    for r in orders:
+        if r.get("ステータス") == "新規":
+            r["起票FLG"] = True
+            cnt_new_checked += 1
+    st.session_state.orders = orders
+    st.toast(f"新規 {cnt_new_checked} 件にチェックを入れました") if cnt_new_checked else st.toast("新規の案件がありません")
+    st.rerun()
+
+# ─── 日付でチェック ───
+if date_check_btn:
+    if date_filter is None:
+        st.warning("日付を入力してください")
+    else:
+        target_mmdd = f"{date_filter.month:02d}/{date_filter.day:02d}"
+        cnt_date_checked = 0
+        for r in orders:
+            row_date = r.get("_nittei_ad") or fmt_date(r.get("納品日")) or ""
+            if row_date == target_mmdd:
+                r["起票FLG"] = True
+                cnt_date_checked += 1
+        st.session_state.orders = orders
+        st.toast(f"{target_mmdd} 納品 {cnt_date_checked} 件にチェックを入れました") if cnt_date_checked else st.toast(f"{target_mmdd} に一致する案件がありません")
+        st.rerun()
+    st.rerun()
+
+# ─── 全解除 ───
+if all_uncheck_btn:
+    for r in orders:
+        r["起票FLG"] = False
+    st.session_state.orders = orders
+    st.rerun()
+
+# ─── 削除（チェック行） ───
+if delete_btn:
+    checked_count = sum(1 for r in orders if r.get("起票FLG"))
+    if checked_count == 0:
+        st.warning("チェックの付いた案件がありません。")
+    else:
+        # 削除キーを iraisho_deleted.json に追記して永続化
+        new_keys = {
+            f"{normalize_path(r['file_path'])}#{r.get('ページ', '')}"
+            for r in orders if r.get("起票FLG")
+        }
+        save_deleted_keys(load_deleted_keys() | new_keys)
+        st.session_state.orders = [r for r in orders if not r.get("起票FLG")]
+        st.toast(f"{checked_count} 件を削除しました")
+        st.rerun()
+
+# ─── スキャン処理 ───
+if scan_btn:
+    # ファイルパス+ページ番号のキーで既存チェック（複数ページ対応）
+    existing_page_keys = {
+        f"{normalize_path(r['file_path'])}#{r.get('ページ', 1)}" for r in orders
+    }
+    existing_norms = {normalize_path(r["file_path"]) for r in orders}
+
+    with st.spinner("スキャン中..."):
+        new_recs = scan_jushi(vfdb, existing_page_keys)
+
+    added = 0
+    newly_added = []  # 新規追加レコードを記録
+    for rec in new_recs:
+        page_key = f"{normalize_path(rec['file_path'])}#{rec.get('ページ', 1)}"
+        if page_key not in existing_page_keys:
+            orders.append(rec)
+            existing_page_keys.add(page_key)
+            existing_norms.add(normalize_path(rec["file_path"]))
+            newly_added.append(rec)
+            added += 1
+
+    st.session_state.orders = orders
+    # 新規追加分を取り込み済みとして記録
+    if added > 0:
+        save_seen_paths(load_seen_paths() | existing_norms)
+    st.session_state._scan_msgs = []
+    if added > 0:
+        st.session_state._scan_msgs.append({"type": "success", "text": f"{added}件追加"})
+    else:
+        st.session_state._scan_msgs.append({"type": "info", "text": "新規案件なし"})
+
+    # 新規追加ファイルに指図書（38:56行）を貼り付け
+    target_items = [
+        (r["file_path"], r.get("ページ", 1))
+        for r in newly_added
+    ]
+    # ① クリーン版を 樹脂指示書_クリーン にコピー（貼り付け前・まだクリーン）
+    CLEAN_DIR.mkdir(exist_ok=True)
+    _copied_clean = 0
+    _seen_clean: set = set()
+    for _fp, _ in target_items:
+        if _fp in _seen_clean:
+            continue
+        _seen_clean.add(_fp)
+        _src = Path(_fp)
+        _dst = CLEAN_DIR / _src.name
+        if not _dst.exists():
+            try:
+                shutil.copy2(_src, _dst)
+                _copied_clean += 1
+            except Exception as _ce:
+                st.session_state._scan_msgs.append(
+                    {"type": "warning", "text": f"クリーンコピー失敗: {_src.name} ({_ce})"}
+                )
+    if _copied_clean > 0:
+        st.session_state._scan_msgs.append(
+            {"type": "success", "text": f"クリーン版 {_copied_clean}件保存"}
+        )
+
+    # ② SGT_cloud側に指図書テンプレ（38:56行）を貼り付け → 外部リンク発生・SGT連携用
+    with st.spinner("指図書を貼り付け中..."):
+        ok, msg = paste_shizusho_via_com(SGT_PATH, target_items)
+    if ok:
+        st.session_state._scan_msgs.append({"type": "success", "text": msg})
+    else:
+        st.session_state._scan_msgs.append({"type": "warning", "text": f"貼り付け: {msg}"})
+
+# ─── ステータス保存 ───
+if save_btn:
+    new_status = {}
+    for r in orders:
+        fp = normalize_path(r.get("file_path", ""))
+        if fp:
+            # 同一ファイル内の複数案件を区別するためページ番号もキーに含める
+            key = f"{fp}#{r.get('ページ', '')}"
+            new_status[key] = {
+                "status": r.get("ステータス", "新規"),
+                "flag":   bool(r.get("起票FLG")),
+                "no":     str(r.get("指図書No", "")),  # 日程ページからの逆引き用
+            }
+    ok, err = save_status(new_status)
+    if ok:
+        st.success("ステータスを保存しましたわ！")
+    else:
+        st.error(f"保存に失敗しました: {err}")
+
+# ─── スキャン結果メッセージ（小さく・閉じられる）───
+if "_scan_msgs" not in st.session_state:
+    st.session_state._scan_msgs = []
+if st.session_state._scan_msgs:
+    _mc, _mx = st.columns([30, 1])
+    with _mc:
+        _colors = {"success": "#5a9", "info": "#888", "warning": "#c96"}
+        _parts = [
+            f'<span style="color:{_colors.get(m["type"], "#888")};">{m["text"]}</span>'
+            for m in st.session_state._scan_msgs
+        ]
+        st.markdown(
+            '<div style="font-size:0.78rem;padding:2px 0;">' + "　／　".join(_parts) + "</div>",
+            unsafe_allow_html=True,
+        )
+    with _mx:
+        if st.button("×", key="clear_scan_msgs", help="閉じる"):
+            st.session_state._scan_msgs = []
+            st.rerun()
+
+st.divider()
+
+# ─── アクションボタン ───
+checked = [r for r in orders if r.get("起票FLG")]
+ac1, ac2, ac3, ac4, ac_cap = st.columns([2, 2, 2, 2, 4])
+with ac1:
+    act_print = st.button("印刷", use_container_width=True, type="primary")
+with ac2:
+    act_add_schedule = st.button("日程表に追加", use_container_width=True, type="primary")
+with ac3:
+    act_complete = st.button("完了処理", use_container_width=True, type="primary")
+with ac4:
+    act_open = st.button("ファイルを開く", use_container_width=True, type="primary")
+with ac_cap:
+    st.markdown(
+        f'<div style="font-size:0.75rem;padding-top:0.45rem;color:var(--text-color);">'
+        f'全 {total} 件　／　チェック中: {len(checked)} 件'
+        f'</div>',
+        unsafe_allow_html=True
+    )
+
+# ─── 状態強制変更 ───
+sc1, sc2, sc3 = st.columns([3, 2, 7])
+with sc1:
+    force_status_sel = st.selectbox(
+        "状態を変更", ["新規", "取込済", "加工済", "完了"],
+        label_visibility="collapsed",
+        key="force_status_sel",
+    )
+with sc2:
+    act_force_status = st.button("チェック行に適用", use_container_width=True)
+
+if act_print:
+    st.info(f"［印刷］{len(checked)} 件が対象です（処理は未実装）。") if checked else st.warning("チェックの付いた案件がありません。")
+if act_add_schedule:
+    if not checked:
+        st.warning("チェックの付いた案件がありません。")
+    else:
+        nittei_path = BASE_DIR / "nittei.json"
+        if not nittei_path.exists():
+            nittei_path = Path(__file__).resolve().parent / "nittei.json"
+        # 既存データ読み込み
+        try:
+            existing = json.loads(nittei_path.read_text(encoding="utf-8")) if nittei_path.exists() else []
+        except Exception:
+            existing = []
+        existing_nos = {r.get("no") for r in existing}
+        added, skipped = 0, 0
+        added_nos = set()  # 今回実際に追加できた指図書No
+        for r in checked:
+            no = str(r.get("指図書No", "")).strip()
+            if not no or no in existing_nos:
+                skipped += 1
+                continue
+            hours = calc_hours(r.get("数量"), r.get("切断工数"))
+            entry = {
+                "no":    no,
+                "nm":    r.get("品名", ""),
+                "grp":   r.get("業態", ""),
+                "qty":   int(r["数量"]) if r.get("数量") else 0,
+                "done":  0,
+                "hours": hours if hours is not None else 0,
+                "ac":    fmt_date(r.get("確定日程")) if r.get("確定日程") else None,
+                "ad":    fmt_date(r.get("納品日"))   if r.get("納品日")   else None,
+                "af":    fmt_date(r.get("納品日")) if r.get("納品日") else None,
+                "proc":  {"start": None, "len": 1, "crew": 2},
+            }
+            existing.append(entry)
+            existing_nos.add(no)
+            added_nos.add(no)
+            added += 1
+        # 書き込み
+        nittei_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+        st.cache_data.clear()
+        # 追加した案件＋重複スキップ案件のステータスを判定（取込済 or 加工済）
+        final_nittei_map = {str(n["no"]): n for n in existing}
+        for r in orders:
+            _n = final_nittei_map.get(str(r.get("指図書No", "")).strip())
+            if _n:
+                qty  = int(_n.get("qty",  0) or 0)
+                done = int(_n.get("done", 0) or 0)
+                r["ステータス"] = "加工済" if (qty > 0 and done >= qty) else "取込済"
+        st.session_state.orders = orders
+        # ステータスを即時保存
+        _new_status = {}
+        for _r in orders:
+            _fp = normalize_path(_r.get("file_path", ""))
+            if _fp:
+                _k = f"{_fp}#{_r.get('ページ', '')}"
+                _new_status[_k] = {
+                    "status": _r.get("ステータス", "新規"),
+                    "flag":   bool(_r.get("起票FLG")),
+                }
+        save_status(_new_status)
+        msgs = []
+        if added:   msgs.append(f"{added} 件を日程表に追加しました")
+        if skipped: msgs.append(f"{skipped} 件は重複のためスキップ")
+        st.toast(" / ".join(msgs) if msgs else "変更なし")
+if act_complete:
+    if not checked:
+        st.warning("チェックの付いた案件がありません。")
+    else:
+        kakou_dict = _load_kakou_dict()
+        _up_r = os.environ.get("USERPROFILE", "")
+        _vfdb_candidates = [
+            BASE_DIR / "vfdb.json",
+            *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up_r else []),
+            Path(__file__).resolve().parent / "vfdb.json",
+        ]
+        _vfdb_path = next((p for p in _vfdb_candidates if p.exists()), None)
+        if _vfdb_path is None:
+            st.error("vfdb.json が見つかりません"); st.stop()
+        vfdb_raw   = json.loads(_vfdb_path.read_text(encoding="utf-8"))
+        vfdb_full  = {r["品目コード"]: r for r in vfdb_raw}
+
+        today_str = datetime.now().strftime("%y%m%d")
+        userprofile = Path(os.environ.get("USERPROFILE", Path.home()))
+        out_dir     = Path(__file__).resolve().parent / "output" / "提出用" / today_str
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        pdf_list       = []
+        completed_rows = []
+        errors         = []
+        prog     = st.progress(0, text="処理中...")
+
+        # 日程ページ（nittei.json）と同じ並び順で処理 → 納品明細書の行順が揃う
+        checked = sorted(checked, key=lambda r: int(r.get("_nittei_idx") or 9999))
+
+        import tempfile as _tmp2
+        _work_dir = Path(os.environ.get("TEMP", _tmp2.gettempdir())) / "vfap_work"
+        _work_dir.mkdir(parents=True, exist_ok=True)
+
+        # ── フェーズ1：帳票書き込み（全件）──
+        _xlsx_jobs = []  # (work_xlsx, page_num, pdf_path, r) のリスト
+        for i, r in enumerate(checked):
+            prog.progress(i / len(checked) * 0.5, text=f"書き込み {i+1}/{len(checked)} 件...")
+            meisai = str(r.get("指図書No", "")).lstrip("0")
+            kakou  = kakou_dict.get(meisai)
+            if not kakou:
+                errors.append(f"加工記録なし: {r.get('品名','?')}（明細No {meisai}）")
+                continue
+
+            vf        = vfdb_full.get(r.get("品目コード", ""), {})
+            file_path = r.get("file_path", "")
+            page_num  = int(r.get("ページ", 1) or 1)
+
+            _clean_path = CLEAN_DIR / Path(file_path).name
+            if not _clean_path.exists():
+                errors.append(f"クリーン版なし: {Path(file_path).name}（先に「指示書取得」か make_clean_copy.py を実行してください）")
+                continue
+
+            _work_xlsx = _work_dir / f"{Path(file_path).stem}_p{page_num}.xlsx"
+            shutil.copy2(str(_clean_path), str(_work_xlsx))
+
+            ok, msg = _fill_jisseki(str(_work_xlsx), page_num, r, kakou, vf)
+            if not ok:
+                errors.append(f"書き込み失敗: {r.get('品名','?')} → {msg}")
+                _work_xlsx.unlink(missing_ok=True)
+                continue
+
+            pdf_path = out_dir / f"{today_str}_{meisai}_p{page_num}.pdf"
+            _xlsx_jobs.append((_work_xlsx, page_num, pdf_path, r))
+
+        # ── フェーズ2：LibreOffice 一括変換 ──
+        prog.progress(0.5, text=f"PDF変換中（LibreOffice 一括）...")
+        soffice = _find_soffice()
+        pdftk   = _find_pdftk()
+        import hashlib as _hashmod, tempfile as _tmpmod
+        _cache_root = Path(os.environ.get("TEMP", _tmpmod.gettempdir())) / "lo_pdf_cache"
+
+        if not soffice:
+            errors.append("LibreOffice が見つかりません")
+        elif not pdftk:
+            errors.append("PDFtk が見つかりません")
+        else:
+            # キャッシュ未使用 or 古いものだけ変換対象に絞る
+            _to_convert = []
+            _cache_map  = {}  # work_xlsx → full_pdf (cache path)
+            for _wx, _pn, _pp, _r in _xlsx_jobs:
+                _sub      = _hashmod.md5(str(_wx.resolve()).encode()).hexdigest()[:12]
+                _cdir     = _cache_root / _sub
+                _cdir.mkdir(parents=True, exist_ok=True)
+                _full_pdf = _cdir / (_wx.stem + ".pdf")
+                _cache_map[str(_wx)] = _full_pdf
+                if not _full_pdf.exists() or _full_pdf.stat().st_mtime < _wx.stat().st_mtime:
+                    _to_convert.append(str(_wx.resolve()))
+
+            if _to_convert:
+                _res = subprocess.run(
+                    [soffice, "--headless", "--norestore",
+                     "--convert-to", "pdf"] + _to_convert,
+                    capture_output=True, text=True, timeout=300,
+                    encoding="cp932", errors="replace",
+                    cwd=str(_cache_root),  # 出力先はキャッシュルートに一時集約
+                )
+                # 変換後ファイルをキャッシュフォルダへ移動
+                for _wx, _, _, _ in _xlsx_jobs:
+                    _generated = _cache_root / (_wx.stem + ".pdf")
+                    _dest = _cache_map[str(_wx)]
+                    if _generated.exists() and _generated != _dest:
+                        _generated.replace(_dest)
+
+            # pdftk でページ抽出
+            for _i, (_wx, _pn, _pp, _r) in enumerate(_xlsx_jobs):
+                prog.progress(0.5 + (_i + 1) / len(_xlsx_jobs) * 0.4,
+                              text=f"ページ抽出 {_i+1}/{len(_xlsx_jobs)} 件...")
+                _full_pdf = _cache_map[str(_wx)]
+                if not _full_pdf.exists():
+                    errors.append(f"PDF変換失敗: {_r.get('品名','?')}")
+                    _wx.unlink(missing_ok=True)
+                    continue
+                _pp.parent.mkdir(parents=True, exist_ok=True)
+                _r2 = subprocess.run(
+                    [pdftk, str(_full_pdf), "cat", str(int(_pn)), "output", str(_pp)],
+                    capture_output=True, text=True, timeout=60,
+                    encoding="cp932", errors="replace",
+                )
+                if _r2.returncode != 0 or not _pp.exists():
+                    errors.append(f"ページ抽出失敗: {_r.get('品名','?')} p{_pn}")
+                    _wx.unlink(missing_ok=True)
+                    continue
+                pdf_list.append(_pp)
+                completed_rows.append(_r)
+                _wx.unlink(missing_ok=True)
+
+        prog.progress(0.9, text="PDF結合中...")
+
+        # ── 納品明細書PDF生成 & pdf_list を納品日順に再編 ──
+        _nittei_d  = _auto_assign_denno_and_save()
+        _fur_keys  = ["kizu","kubomi","imono","kake","meyani","beko","osen","keijo","sonota"]
+        from collections import OrderedDict as _OD
+        _date_groups = _OD()
+        _pdf_debug_log(f"[明細書] nittei_dict keys({len(_nittei_d)}): {list(_nittei_d.keys())[:5]}")
+        for _r_cm, _p_cm in zip(completed_rows, pdf_list):
+            _mno_cm = str(_r_cm.get("指図書No", "")).lstrip("0")
+            _ne_cm  = _nittei_d.get(_mno_cm, {})
+            _ad_cm  = _ne_cm.get("ad") or ""
+            _denno_cm = _ne_cm.get("denno") or ""
+            _pdf_debug_log(f"[明細書] 指図書No={_mno_cm} → ad={_ad_cm} denno={_denno_cm}")
+            _date_groups.setdefault(_ad_cm, []).append((_r_cm, _p_cm, _ne_cm))
+
+        _pdf_list_new = []
+        for _ad_key, _grp in _date_groups.items():
+            _row_no = 1
+            _items_for_ms = []
+            for _r_cm, _p_cm, _ne_cm in _grp:
+                _mno_cm   = str(_r_cm.get("指図書No", "")).lstrip("0")
+                _kk       = kakou_dict.get(_mno_cm) or {}
+                _fur_cm   = _kk.get("furyou") or {}
+                _sei_fur  = sum((_fur_cm.get(k) or 0) for k in _fur_keys)
+                _lots_raw = _kk.get("lots") or []
+                if _lots_raw:
+                    _lots_cm = [(_l.get("lot",""), _l.get("hako",0)) for _l in _lots_raw]
+                else:
+                    _lots_cm = [(_kk.get("kakou_lot",""), _kk.get("hako_su",0) or 0)]
+                _hako_cm = sum(_l[1] for _l in _lots_cm)
+                _items_for_ms.append({
+                    "row_no":    _row_no,
+                    "meisai_no": str(_r_cm.get("指図書No","")),
+                    "hinmei":    _r_cm.get("品名",""),
+                    "qty":       int(_kk.get("nyuko_su") or 0) or int(_r_cm.get("数量",0) or 0),
+                    "furyou":    _sei_fur,
+                    "hako":      _hako_cm,
+                    "lots":      _lots_cm,
+                    "denno":     _ne_cm.get("denno",""),
+                })
+                _row_no += 1
+            _ad_safe = (_ad_key or "nodate").replace("/","")
+            _ms_path = out_dir / f"{today_str}_{_ad_safe}_meisaisho.pdf"
+            _ok_ms, _msg_ms = _make_meisaisho_pdf(_ad_key, _items_for_ms, str(_ms_path))
+            if _ok_ms:
+                _pdf_list_new.append(_ms_path)
+            else:
+                errors.append(f"納品明細書生成失敗({_ad_key}): {_msg_ms}")
+            for _r_cm, _p_cm, _ in _grp:
+                _pdf_list_new.append(_p_cm)
+
+        if _pdf_list_new:
+            pdf_list = _pdf_list_new
+        # ────────────────────────────────────────────────────
+
+        if pdf_list:
+            merged = out_dir / f"{today_str}_納品分一式.pdf"
+            ok, msg = _merge_pdfs_pdftk(pdf_list, str(merged))
+            if ok:
+                st.success(f"完了！ {len(pdf_list)} 件 → {merged.name}")
+                # ── 帳票保管庫へ自動コピー（納品明細書／年/月）──
+                try:
+                    _now_ar  = datetime.now()
+                    _arch_dir = (CHOHYO_DIRS["納品明細書"]
+                                 / _now_ar.strftime("%Y") / _now_ar.strftime("%m"))
+                    _arch_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(merged), str(_arch_dir / merged.name))
+                    st.caption(f"🗄 保管庫に保存: 納品明細書/{_now_ar:%Y}/{_now_ar:%m}/{merged.name}")
+                except Exception as _earch:
+                    st.caption(f"※保管庫コピー失敗: {_earch}")
+                with open(merged, "rb") as _mf:
+                    st.download_button(
+                        label=f"📄 {merged.name} をダウンロード",
+                        data=_mf,
+                        file_name=merged.name,
+                        mime="application/pdf",
+                    )
+                for r in completed_rows:
+                    r["ステータス"] = "完了"
+                    r["起票FLG"]   = False
+                # 完了行を最下行へ移動
+                done_ids = {id(r) for r in completed_rows}
+                orders = [r for r in orders if id(r) not in done_ids] \
+                       + [r for r in orders if id(r) in done_ids]
+                st.session_state.orders = orders
+                # ステータスを即時保存（リロードで戻らないように）
+                _new_status = {}
+                for _r in orders:
+                    _fp = normalize_path(_r.get("file_path", ""))
+                    if _fp:
+                        _k = f"{_fp}#{_r.get('ページ', '')}"
+                        _new_status[_k] = {
+                            "status": _r.get("ステータス", "新規"),
+                            "flag":   bool(_r.get("起票FLG")),
+                        }
+                save_status(_new_status)
+            else:
+                st.error(f"PDF結合失敗: {msg}")
+                st.info(f"個別 PDF は {out_dir} に保存済みです")
+        else:
+            st.warning("処理できた案件がありません")
+
+        if errors:
+            with st.expander(f"⚠ エラー {len(errors)} 件"):
+                for e in errors:
+                    st.write(e)
+if act_open:
+    if checked:
+        # 1ファイルに複数案件が入っている場合、同じファイルを何度も
+        # 開かないようパスで重複除去する（順序は保つ）。
+        seen = set()
+        unique_targets = []
+        for r in checked:
+            fp = r.get("file_path", "")
+            key = normalize_path(fp)
+            if fp and key not in seen:
+                seen.add(key)
+                unique_targets.append(r)
+        opened, failed = 0, []
+        for r in unique_targets:
+            fp = r.get("file_path", "")
+            ok, msg = open_in_excel(fp)
+            if ok:
+                opened += 1
+            else:
+                failed.append(f"{r.get('ファイル名', '?')}: {msg}")
+        if opened:
+            st.toast(f"Excelで {opened} 件開きました")
+        if failed:
+            st.warning("開けなかったもの:\n" + "\n".join(failed))
+    else:
+        st.warning("チェックの付いた案件がありません。")
+
+if act_force_status:
+    if not checked:
+        st.warning("チェックの付いた案件がありません。")
+    else:
+        for r in checked:
+            r["ステータス"] = force_status_sel
+        st.session_state.orders = orders
+        # 即時保存
+        _new_status = {}
+        for _r in orders:
+            _fp = normalize_path(_r.get("file_path", ""))
+            if _fp:
+                _k = f"{_fp}#{_r.get('ページ', '')}"
+                _new_status[_k] = {
+                    "status": _r.get("ステータス", "新規"),
+                    "flag":   bool(_r.get("起票FLG")),
+                }
+        save_status(_new_status)
+        st.toast(f"{len(checked)} 件を「{force_status_sel}」に変更しました")
+        st.rerun()
+
+st.divider()
+
+# ─── 一覧テーブル ───
+filtered = list(orders)
+
+# ソート：日程ページ（nittei.json）と同じ並び順、完了は末尾
+def _sort_key(r):
+    done = 1 if r.get("ステータス") == "完了" else 0  # 完了行は常に最下行
+    idx  = r.get("_nittei_idx")
+    # nittei.json に登録済みなら日程ページの並び順をそのまま使う
+    if idx is not None:
+        return (done, int(idx))
+    # nittei.json 未登録は完了手前の末尾（指図書No順）
+    try:    return (done, 9000 + int(r.get("指図書No", 0) or 0))
+    except: return (done, 9999)
+filtered.sort(key=_sort_key)
+
+if not filtered:
+    st.info("表示する案件がありません")
+else:
+    rows = []
+    for r in filtered:
+        vf = vfdb.get(str(r.get("品目コード", "") or ""), {})
+
+        def _v(key, default=""):
+            """r の値を優先し、空/None/0 なら vfdb にフォールバック"""
+            val = r.get(key)
+            if val not in (None, "", 0):
+                return val
+            return vf.get(key, default)
+
+        kosuu = _v("切断工数")
+        h     = calc_hours(r.get("数量"), kosuu)
+        rows.append({
+            "フラグ"      : bool(r.get("起票FLG")),
+            "状態"        : STATUS_ICON.get(r.get("ステータス", ""), "") + " " + r.get("ステータス", ""),
+            "明細No"      : r.get("指図書No", ""),
+            "指図書No"    : r.get("品目番号", ""),
+            "品目コード"  : r.get("品目コード", ""),
+            "品名"        : _v("品名"),
+            "数量"        : r.get("数量"),
+            "納品日"      : r.get("_nittei_ad") or fmt_date(r.get("確定日程")),
+            "期限"        : r.get("_nittei_af") or fmt_date(r.get("納品日")),
+            "工数(本/h)"  : kosuu,
+            "加工時間(h)" : h,
+            "取数"        : _v("取数"),
+            "梱包"        : _v("梱包"),
+            "ページ"      : r.get("ページ"),
+            "ファイル名"  : r.get("ファイル名", ""),
+            "更新日時"    : fmt_datetime(get_mtime(r.get("file_path"))),
+            "業態"        : _v("業態"),
+            "単価"        : _v("単価"),
+        })
+
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    editable_cols  = {"フラグ"}
+    disabled_cols  = [c for c in df.columns if c not in editable_cols]
+
+    # data_editor の on_change: チェックボックス変更を orders に反映
+    st.session_state["_editor_targets"] = filtered
+
+    def _apply_flag_edits():
+        targets = st.session_state.get("_editor_targets", [])
+        state   = st.session_state.get("order_editor", {})
+        edited  = state.get("edited_rows", {}) if isinstance(state, dict) else {}
+        new_flag_val = None
+        edited_positions: set = set()
+        for pos, cols in edited.items():
+            if "フラグ" in cols:
+                if 0 <= pos < len(targets):
+                    targets[pos]["起票FLG"] = bool(cols["フラグ"])
+                    new_flag_val = bool(cols["フラグ"])
+                    edited_positions.add(int(pos))
+        # 複数行選択一括適用（JS が URL params _sgt_sel に選択行インデックスを書き込む）
+        if new_flag_val is not None:
+            try:
+                _sel_str = st.query_params.get("_sgt_sel", "")
+            except Exception:
+                _sel_str = ""
+            if _sel_str:
+                for _x in _sel_str.split(","):
+                    _x = _x.strip()
+                    if _x.isdigit():
+                        _p = int(_x)
+                        if 0 <= _p < len(targets) and _p not in edited_positions:
+                            targets[_p]["起票FLG"] = new_flag_val
+
+    _checked_idx = ",".join(str(i) for i, r in enumerate(filtered) if r.get("起票FLG"))
+
+    st.markdown(f"""
+<style>
+/* 行ホバー */
+.stDataFrameGlideDataEditor [role="row"]:hover [role="gridcell"] {{
+    background: rgba(255,140,40,0.10) !important;
+}}
+/* チェック行ハイライト */
+.stDataFrameGlideDataEditor [role="row"].row-checked [role="gridcell"] {{
+    background: rgba(46,158,91,0.18) !important;
+}}
+</style>
+<div id="hl-rows" data-checked="{_checked_idx}" style="display:none"></div>
+""", unsafe_allow_html=True)
+
+    _nav_comp.html(f"""<script>
+(function(){{
+  const doc = window.parent.document;
+  // ── チェック行ハイライト ──
+  const checkedSet = new Set(
+    (doc.getElementById('hl-rows')?.dataset.checked || '')
+    .split(',').filter(Boolean).map(Number)
+  );
+  function applyRowHL(){{
+    const grid = doc.querySelector('.stDataFrameGlideDataEditor');
+    if(!grid) return;
+    grid.querySelectorAll('[role="row"]').forEach((row, pos)=>{{
+      if(pos === 0) return; // ヘッダー行はスキップ
+      const ari = row.getAttribute('aria-rowindex');
+      const idx = ari != null ? Number(ari) - 2 : pos - 1;
+      row.classList.toggle('row-checked', checkedSet.has(idx));
+    }});
+  }}
+  const rowObs = new MutationObserver(applyRowHL);
+  rowObs.observe(doc.body, {{childList:true, subtree:true}});
+  [100, 400, 900].forEach(t => setTimeout(applyRowHL, t));
+
+  // ── 複数行選択 → URL params 書き込み（一括チェック用） ──
+  // aria-selected が使えないためマウスドラッグ start/end を自前追跡
+  (function(){{
+    const win = window.parent;
+    let _selStart = -1, _selEnd = -1, _dragging = false;
+
+    // クライアントY → 0ベース行インデックス
+    function rowFromClientY(clientY){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(!sc) return -1;
+      const rows = sc.querySelectorAll('[role="row"]');
+      const scRect = sc.getBoundingClientRect();
+      const relY = clientY - scRect.top;
+      const scrolledY = relY + sc.scrollTop;
+      let headerH = 35, rowH = 35;
+      if(rows.length >= 1) headerH = rows[0].getBoundingClientRect().height || 35;
+      if(rows.length >= 2) rowH   = rows[1].getBoundingClientRect().height || 35;
+      if(scrolledY < headerH) return -1;
+      return Math.floor((scrolledY - headerH) / rowH);
+    }}
+
+    // フラグ列（第1列）の幅: gridcell で取れなければ固定値
+    function getFirstColWidth(){{
+      const cell = doc.querySelector('.dvn-scroller [role="gridcell"][aria-colindex="1"]');
+      return cell ? cell.offsetWidth : 55;
+    }}
+
+    function onPointerDown(e){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(!sc) return;
+      const rect = sc.getBoundingClientRect();
+      const relX = e.clientX - rect.left;
+      const row  = rowFromClientY(e.clientY);
+
+      if(relX >= getFirstColWidth()){{
+        // フラグ列以外 → 選択ドラッグ開始として記録
+        _dragging = true;
+        _selStart = row;
+        _selEnd   = row;
+        const url = new URL(win.location.href);
+        url.searchParams.delete('_sgt_sel');
+        win.history.replaceState(null, '', url.toString());
+      }} else {{
+        // フラグ列クリック → 記録済み選択範囲で一括適用
+        _dragging = false;
+        const url = new URL(win.location.href);
+        if(_selStart >= 0 && _selEnd >= 0 && _selStart !== _selEnd){{
+          const minR = Math.min(_selStart, _selEnd);
+          const maxR = Math.max(_selStart, _selEnd);
+          const sel  = Array.from({{length: maxR - minR + 1}}, (_, i) => minR + i);
+          url.searchParams.set('_sgt_sel', sel.join(','));
+        }} else {{
+          url.searchParams.delete('_sgt_sel');
+        }}
+        win.history.replaceState(null, '', url.toString());
+      }}
+    }}
+
+    function onPointerMove(e){{
+      if(!_dragging || e.buttons !== 1) return;
+      const r = rowFromClientY(e.clientY);
+      if(r >= 0) _selEnd = r;
+    }}
+
+    function attachListeners(){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(sc && !sc._sgtSelOn){{
+        sc._sgtSelOn = true;
+        sc.addEventListener('pointerdown', onPointerDown, {{capture:true}});
+        sc.addEventListener('pointermove', onPointerMove, {{passive:true}});
+        sc.addEventListener('pointerup',   ()=>{{ _dragging=false; }}, {{passive:true}});
+      }}
+    }}
+    const selObs = new MutationObserver(attachListeners);
+    selObs.observe(doc.body, {{childList:true, subtree:true}});
+    [200, 600, 1200].forEach(t=>setTimeout(attachListeners, t));
+  }})();
+
+  // ── 列ホバー（既存） ──
+  (function injectColHL(){{
+    const ORANGE_COL = "rgba(255,140,40,0.13)";
+    function applyTo(root){{
+      root.querySelectorAll('[role="columnheader"]').forEach((th,ci)=>{{
+        th.addEventListener("mouseenter",()=>{{
+          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
+            td.style.background=ORANGE_COL;}});
+          th.style.background=ORANGE_COL;
+        }});
+        th.addEventListener("mouseleave",()=>{{
+          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
+            td.style.background="";}});
+          th.style.background="";
+        }});
+      }});
+    }}
+    const obs=new MutationObserver(()=>{{
+      doc.querySelectorAll('iframe').forEach(f=>{{
+        try{{ if(f.contentDocument) applyTo(f.contentDocument); }}catch(e){{}}
+      }});
+    }});
+    obs.observe(doc.body,{{childList:true,subtree:true}});
+  }})();
+}})();
+</script>""", height=0, scrolling=False)
+
+    st.data_editor(
+        df,
+        use_container_width=True,
+        height=650,
+        column_config={
+            "フラグ"      : st.column_config.CheckboxColumn("フラグ", help="チェックで起票フラグON"),
+            "加工時間(h)" : st.column_config.NumberColumn(format="%.1f h"),
+            "単価"        : st.column_config.NumberColumn(format="¥%d"),
+            "数量"        : st.column_config.NumberColumn(format="%d"),
+        },
+        disabled=disabled_cols,
+        hide_index=True,
+        key="order_editor",
+        on_change=_apply_flag_edits,
+    )
+
+st.markdown('<div style="height:50px"></div>', unsafe_allow_html=True)

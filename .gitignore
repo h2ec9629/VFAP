@@ -1,0 +1,6 @@
+﻿output/
+*.pyc
+__pycache__/
+.env
+*.log
+.vfap_cache/
