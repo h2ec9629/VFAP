@@ -37,7 +37,11 @@ if errorlevel 1 goto wait_loop
 
 echo.
 echo  Server ready! Opening browser...
+<<<<<<< HEAD
 start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:8501
+=======
+start http://localhost:8501
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
 echo.
 echo ============================================================

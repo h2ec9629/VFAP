@@ -143,10 +143,13 @@
   .btn-pdf{background:#e86a00!important;color:#fff!important;border:1px solid #e86a00!important;
            font-weight:700;padding:5px 14px;border-radius:5px;cursor:pointer;font-size:13px;}
   .btn-pdf:hover{background:#c55a00!important;}
+<<<<<<< HEAD
   /* 複数月選択時はPDF出力を無効化 */
   .btn-pdf.disabled{background:#555!important;border-color:#555!important;color:#aaa!important;
                     cursor:not-allowed;opacity:.6;}
   .btn-pdf.disabled:hover{background:#555!important;}
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
   /* 業態カラー（画面） */
   table.billing td[data-gyotai="LED"]  {background:#1b2a3a;color:#7ba7d9;font-weight:700;text-align:left;}
@@ -286,7 +289,11 @@
   <h1>📋 請求</h1>
   <span class="sub">月別工賃集計</span>
   <span id="status-msg">読み込み中…</span>
+<<<<<<< HEAD
   <button class="btn-pdf" id="btn-pdf" onclick="onPdfClick()">🖨 PDF出力</button>
+=======
+  <button class="btn-pdf" onclick="window.print()">🖨 PDF出力</button>
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 </header>
 
 <div class="month-tabs" id="month-tabs"></div>
@@ -406,6 +413,7 @@ function toggleMonth(m) {
 
 function renderTabs() { /* 月グリッドに移行済み — no-op */ }
 
+<<<<<<< HEAD
 // PDF出力ボタンの有効/無効を更新（2か月以上選択時は無効）
 function updatePdfBtn() {
   const btn = document.getElementById('btn-pdf');
@@ -431,6 +439,10 @@ function onPdfClick() {
 function renderContent() {
   const el = document.getElementById('page-content');
   updatePdfBtn();
+=======
+function renderContent() {
+  const el = document.getElementById('page-content');
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
   // 選択月のデータを合算
   const rows = [];
@@ -719,11 +731,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   _byMonth = buildBillingData(kakouList);
   const _allMonths = Object.keys(_byMonth).map(Number).sort((a, b) => a - b);
   if (_allMonths.length > 0) {
+<<<<<<< HEAD
     const curMonth = new Date().getMonth() + 1; // 今月
     const pick = _allMonths.includes(curMonth)
       ? curMonth                                 // 今月にデータがあれば今月
       : _allMonths[_allMonths.length - 1];        // なければ最新月にフォールバック
     _selectedMonths = new Set([pick]);
+=======
+    _selectedMonths = new Set([_allMonths[_allMonths.length - 1]]);
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   }
   statusEl.textContent = kakouList.length > 0
     ? `加工記録 ${kakouList.length}件 読み込み済`

@@ -11,7 +11,11 @@
     --mat:#f3d518; --deliv:#2e9e5b; --due:#d23b3b;
     --accent:#d97757; --accent-hi:#e89070;   /* Claudeオレンジ */
     --bar-h:14px; --bar-top:8px;
+<<<<<<< HEAD
     --row-h:30px; --left-w:881px; --cell-w:30px;
+=======
+    --row-h:30px; --left-w:859px; --cell-w:30px;
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;height:100%;font-family:"游ゴシック","Yu Gothic",sans-serif;background:var(--bg);color:var(--ink);}
@@ -58,13 +62,21 @@
   .fld.shohi{flex:0 0 42px;text-align:right;color:#e8e8e8;font-size:11px;}
   .fld.zansu{flex:0 0 42px;text-align:right;font-weight:700;color:#e8e8e8;font-size:11px;}
   .fld.no{flex:0 0 70px;color:var(--sub);font-weight:600;}
+<<<<<<< HEAD
   .fld.nm{flex:0 0 242px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;}
+=======
+  .fld.nm{flex:0 0 220px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   #show-hidden-btn{position:absolute;right:3px;top:50%;transform:translateY(-50%);font-size:10px;padding:1px 5px;background:#2a2a2a;color:#aaa;border:1px solid #444;border-radius:4px;cursor:pointer;font-weight:600;white-space:nowrap;pointer-events:all;}
   #show-hidden-btn:hover{background:#3a3a3a;color:#fff;}
   #show-hidden-btn.active{background:#1a3020;color:#4ec97a;border-color:#3a7a50;}
   .fld.nm:hover{overflow:visible;z-index:20;}
   .fld.nm:hover .nmtxt{position:absolute;left:0;top:50%;transform:translateY(-50%);background:var(--panel);border:1px solid #444;border-radius:4px;padding:2px 8px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.6);}
+<<<<<<< HEAD
   .fld.nm.nm-pcin{background:#9dc183;color:#000;}
+=======
+  .fld.nm.nm-pcin{background:#90ee90;color:#000;}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   .fld.nm.nm-pcin:hover .nmtxt{color:#fff;}
   .fld.qty{flex:0 0 54px;text-align:right;cursor:pointer;font-size:16px;}
   .fld.qty:hover{filter:brightness(1.3);}
@@ -94,10 +106,22 @@
   tr.row:hover td.left{background:#382d23;}
   tr.row:hover td.cell{background:rgba(255,140,40,0.10);}
   thead th.day:hover{background:rgba(255,140,40,0.15) !important;}
+<<<<<<< HEAD
   tr.row.mv-pick td.left{background:#254532 !important;box-shadow:inset 3px 0 0 var(--proc1,#3fb37a);}
   tr.row.mv-pick td.cell{background:rgba(46,158,91,0.10);}
   tr.row.mv-pick .grip{color:#3fb37a;}
   /* 加工中（1〜99%、または直前が100%で自分が0%の着手行） */
+=======
+  tr.row.selected td.left{background:#1a2d45 !important;}
+  tr.row.selected td.cell{background:rgba(80,140,220,0.10);}
+  tr.row.mv-pick td.left{background:#254532 !important;box-shadow:inset 3px 0 0 var(--proc1,#3fb37a);}
+  tr.row.mv-pick td.cell{background:rgba(46,158,91,0.10);}
+  tr.row.mv-pick .grip{color:#3fb37a;}
+  /* 納品日ハイライト（日付フィルター） */
+  tr.row.deliv-match td.left{background:#1a3020;box-shadow:inset 3px 0 0 #2e9e5b;}
+  tr.row.deliv-match td.cell{background:rgba(46,158,91,0.18);}
+  /* 加工中（1〜99%、または直前が100%で自分が0%の着手行） — deliv-matchより後なので優先 */
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   tr.row.in-progress td.left{background:#283341 !important;box-shadow:inset 3px 0 0 #4a9eff;}
   tr.row.in-progress td.cell{background:rgba(74,158,255,0.07);}
   /* 並行タスク */
@@ -111,6 +135,7 @@
   #parallel-ctx-menu .ctx-sep{border-top:1px solid #333;margin:4px 0;}
   #parallel-ctx-menu .ctx-clear{padding:6px 12px;cursor:pointer;color:#e07060;}
   #parallel-ctx-menu .ctx-clear:hover{background:#2a2a2a;}
+<<<<<<< HEAD
   #parallel-ctx-menu .ctx-bunno{padding:6px 12px;cursor:pointer;color:#5ab0e0;font-weight:600;}
   #parallel-ctx-menu .ctx-bunno:hover{background:#15293a;}
   /* 納品マーカーと進捗バーが重なっている＝納品遅延の恐れ → ほんのり赤くハイライト */
@@ -125,6 +150,11 @@
   /* 行選択 — 最優先 */
   tr.row.selected td.left{background:#1a2d45 !important;}
   tr.row.selected td.cell{background:rgba(80,140,220,0.10);}
+=======
+  /* 納品マーカーと進捗バーが重なっている＝納品遅延の恐れ → ほんのり赤くハイライト */
+  tr.row.deliv-risk td.left{background:#3b2626 !important;}
+  tr.row.deliv-risk td.cell{background:rgba(210,59,59,0.10);}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   thead th.day.col-hl{background:rgba(255,140,40,0.20) !important;}
   td.cell.col-hl{background:rgba(255,140,40,0.10);}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:50;}
@@ -278,7 +308,10 @@
   /* 明細Noリンク */
   .fld.no.kiroku-trigger{cursor:pointer;color:var(--proc1);}
   .fld.no.kiroku-trigger:hover{text-decoration:underline;filter:brightness(1.2);}
+<<<<<<< HEAD
   .fld.no.no-bunno{font-size:11px;white-space:nowrap;letter-spacing:-.3px;}
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   /* スピナー非表示 */
   .kiroku-overlay input[type=number]::-webkit-inner-spin-button,
   .kiroku-overlay input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
@@ -357,6 +390,7 @@
     background:linear-gradient(to top right, transparent calc(50% - 0.8px), #6a6a6a calc(50% - 0.8px), #6a6a6a calc(50% + 0.8px), transparent calc(50% + 0.8px));
   }
   /* 支給・消費・残数 トグル非表示 */
+<<<<<<< HEAD
   body.hide-kss{--left-w:755px;}
   body.hide-kss .fld.kyukyu,
   body.hide-kss .fld.shohi,
@@ -375,6 +409,27 @@
   <h1>6月度 切断加工日程表</h1>
   <span class="sub" id="deliv-warn" style="display:none;color:var(--due);font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
   <span class="sub" id="samedaywork-warn" style="display:none;color:#f0c040;font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
+=======
+  body.hide-kss{--left-w:733px;}
+  body.hide-kss .fld.kyukyu,
+  body.hide-kss .fld.shohi,
+  body.hide-kss .fld.zansu{display:none !important;}
+  #kss-toggle-btn{font-size:12px;padding:3px 8px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:5px;color:#aaa;cursor:pointer;white-space:nowrap;}
+  #kss-toggle-btn.active{background:#1a2a1a;border-color:#3a7a50;color:#4ec97a;}
+  /* 伝票No列 トグル非表示 */
+  body.hide-denno{--left-w:805px;}
+  body.hide-kss.hide-denno{--left-w:679px;}
+  body.hide-denno .fld.denno{display:none !important;}
+  .fld.denno{flex:0 0 54px;text-align:center;font-size:12px;font-weight:700;color:#c88040;cursor:default;}
+  #denno-toggle-btn{font-size:12px;padding:3px 8px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:5px;color:#aaa;cursor:pointer;white-space:nowrap;}
+  #denno-toggle-btn.active{background:#1a2a1a;border-color:#c88040;color:#c88040;}
+</style>
+</head>
+<body>
+<header>
+  <h1>6月度 切断加工日程表</h1>
+  <span class="sub" id="deliv-warn" style="display:none;color:var(--due);font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   <div class="btns">
     <button id="sort-due-btn" onclick="sortPicksByDue()" style="display:none;background:#2e9e5b;color:#fff;border-color:#2e9e5b;">⇅ 期限でソート</button>
     <button onclick="autoAssignDenno()" style="background:#5a3800;color:#c88040;border-color:#c88040;" title="納品日グループごとに伝票Noを自動採番（未採番のみ）">採番</button>
@@ -383,7 +438,12 @@
 </header>
 <div class="legend">
   <span class="sim-area">
+<<<<<<< HEAD
     <button id="detail-toggle-btn" onclick="toggleDetail()" title="支給・消費・残数・伝票No列の表示切替">詳細 ▶</button>
+=======
+    <button id="kss-toggle-btn" onclick="toggleKss()" title="支給・消費・残数列の表示切替">支給/消費/残数 ▼</button>
+    <button id="denno-toggle-btn" onclick="toggleDenno()" title="伝票No列の表示切替">伝票No ▼</button>
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   </span>
   <span><i style="background:var(--proc2)"></i>工程（二人・灯具以外）</span>
   <span><i style="background:var(--proc1)"></i>工程（一人・灯具）</span>
@@ -540,11 +600,18 @@ function isAutoHide(r){
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return adDate < todayDate;  // 納品日が今日より前（超過）
 }
+<<<<<<< HEAD
 function toggleDetail(){
   const isHidden=document.body.classList.toggle('hide-kss');
   document.body.classList.toggle('hide-denno',isHidden);
   const btn=document.getElementById('detail-toggle-btn');
   if(btn){btn.textContent=isHidden?'詳細 ▶':'詳細 ▼';btn.classList.toggle('active',!isHidden);}
+=======
+function toggleKss(){
+  const hidden=document.body.classList.toggle('hide-kss');
+  const btn=document.getElementById('kss-toggle-btn');
+  if(btn){btn.textContent=hidden?'支給/消費/残数 ▶':'支給/消費/残数 ▼';btn.classList.toggle('active',hidden);}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 }
 function toggleShowHidden(){
   showHidden = !showHidden;
@@ -557,8 +624,12 @@ function buildBody(){
   const tb=document.getElementById('body');tb.innerHTML="";
   const BAR_OFFSET=getSimOffset(); // バー表示位置（シミュトグル連動）
   let cumH=0; // 累計工数は常に0から（表示される「累X.Xh」の基準）
+<<<<<<< HEAD
   let delivRiskCount=0; // 納品日を追い越す件数（遅延の恐れ・赤）
   let sameDayCount=0;   // 納品日当日に食い込む件数（当日まで作業・黄）
+=======
+  let delivRiskCount=0; // 納品マーカーと進捗バーが重なっている件数
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   let prevZansu=null; // 8FL281304行の残数累積
   rows.forEach((r,idx)=>{
     if(!showHidden && isAutoHide(r)) return;  // 自動非表示
@@ -572,10 +643,13 @@ function buildBody(){
     let startH, endH;
     if(r.parallelFrom){
       const _pi=days.findIndex(d=>d[0]===r.parallelFrom);
+<<<<<<< HEAD
       // 開始日を手動変更した行(parallelFrom)は、その開始位置に固定表示する。
       // -BAR_OFFSET は描画時の +BAR_OFFSET を打ち消すための仕掛け。
       // これにより +4h/+8h シミュを切ってもこの行だけは動かない（＝固定）。
       // ★この -BAR_OFFSET は消さないこと（消すと固定行がシミュで動いてしまう）
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
       startH=(_pi>=0)?(_pi*8-BAR_OFFSET):cumH;
       endH=startH+remaining;
       cumH=endH; // 速めた行の終わりから後続を直列で積み直す（アンカー＆再連結）
@@ -610,6 +684,7 @@ function buildBody(){
         const shohi_disp=is8FL?shohi:0;
         return `<span class="fld shohi">${shohi_disp}</span><span class="fld zansu">${zansu}</span>`;
       })()}
+<<<<<<< HEAD
       <span class="fld no kiroku-trigger${String(r.no).includes('-')?' no-bunno':''}" onclick="openKiroku(${idx});event.stopPropagation();">${String(r.no).replace(/^0+/,'')}</span>
       <span class="fld nm${r.nm&&r.nm.includes('PC IN')?' nm-pcin':''}"><span class="nmtxt">${r.nm}</span></span>
       <span class="fld qty${qtyMod?' mod-qty':''}" data-edit="qty" data-idx="${idx}" tabindex="0">${r.qty}<span class="phour">${(()=>{
@@ -620,6 +695,11 @@ function buildBody(){
         const _rem=r.qty-r.done;
         return(_ks>0&&_rem>0)?(_rem/_ks).toFixed(1)+'h':'';
       })()}</span></span>
+=======
+      <span class="fld no kiroku-trigger" onclick="openKiroku(${idx});event.stopPropagation();">${String(r.no).replace(/^0+/,'')}</span>
+      <span class="fld nm${r.nm&&r.nm.includes('PC IN')?' nm-pcin':''}"><span class="nmtxt">${r.nm}</span></span>
+      <span class="fld qty${qtyMod?' mod-qty':''}" data-edit="qty" data-idx="${idx}" tabindex="0">${r.qty}<span class="phour">${r.hours>0?Math.round(r.qty/r.hours)+'/h':''}</span></span>
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
       <span class="fld done ${p>=100?'full':''}" data-edit="done" data-idx="${idx}" tabindex="0">${r.done}<small> ${p}%</small></span>
       <span class="fld hrs"><b>${remaining.toFixed(1)}</b><span class="cum">/${endH.toFixed(1)}</span>${r.parallelFrom?`<span class="parallel-mark" title="並行: ${r.parallelFrom}">⤺</span>`:''}</span>
       <span class="fld dchip mat" data-edit="ac" data-idx="${idx}" tabindex="0">${r.ac||"—"}</span>
@@ -666,6 +746,7 @@ function buildBody(){
       addMark(r.af,"due",1); // 期限も午後列に統一
     } // 引取・納品=午後(PM), 期限=午前
 
+<<<<<<< HEAD
     // 進捗バーが納品日カラムに差し掛かったら警告
     //   ・納品日の午前枠に差し掛かる → 当日まで作業（黄）
     //   ・納品日の午後枠に差し掛かる → 納品遅延の恐れ（赤）。赤が優先
@@ -684,6 +765,19 @@ function buildBody(){
         // 納品日の午前枠に差し掛かる → 当日まで作業（黄）
         tr.classList.add('samedaywork-risk');
         sameDayCount++;
+=======
+    // 納品マーカーと進捗バーの重なり判定（＝納品遅延の恐れ）
+    if(!pct100 && sAd!=null){
+      const pxPerH=CW/HRS_PER_SLOT;
+      const barLeft=(startH+BAR_OFFSET)*pxPerH+1;
+      const barRight=barLeft+Math.max(remaining*pxPerH-2,4);
+      const markLeft=sAd*CW+1;
+      const markWidth=(sAd===sAf)?Math.floor((CW-2)/2):(CW-2);
+      const markRight=markLeft+markWidth;
+      if(barLeft<markRight && markLeft<barRight){
+        tr.classList.add('deliv-risk');
+        delivRiskCount++;
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
       }
     }
 
@@ -708,6 +802,7 @@ function buildBody(){
       warnEl.style.display='none';
     }
   }
+<<<<<<< HEAD
   const sameDayEl=document.getElementById('samedaywork-warn');
   if(sameDayEl){
     if(sameDayCount>0){
@@ -718,6 +813,8 @@ function buildBody(){
       sameDayEl.style.display='none';
     }
   }
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 }
 
 function attachColHover(){
@@ -1046,13 +1143,21 @@ function getEditableCells(){
   return [...document.querySelectorAll('[data-edit]')];
 }
 
+<<<<<<< HEAD
 function startEdit(el, prefill){
+=======
+function startEdit(el){
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   // rebuild:false → el がデタッチされないよう遷移時はリビルドしない
   if(activeCell) commitEdit(activeCell, false);
   const idx=+el.dataset.idx;
   const field=el.dataset.edit;
   const isDate=(field==='ac'||field==='ad'||field==='af');
+<<<<<<< HEAD
   const curVal=prefill!==undefined ? prefill : (isDate?(rows[idx][field]||''):(rows[idx][field]??0));
+=======
+  const curVal=isDate?(rows[idx][field]||''):(rows[idx][field]??0);
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
   el.classList.add('editing','selected-cell');
   const input=document.createElement('input');
@@ -1069,9 +1174,12 @@ function startEdit(el, prefill){
     const navKeys=['Enter','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
     if(navKeys.includes(e.key)){
       e.preventDefault();
+<<<<<<< HEAD
       // Enter on ac/ad → 確定値を下セルに引き継ぐ
       const _doCarry = e.key==='Enter' && (field==='ac'||field==='ad');
       const _carryIdx = idx, _carryField = field;
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
       commitEdit(activeCell, false);
       const all=getEditableCells();
       const cur=all.indexOf(el);
@@ -1085,10 +1193,14 @@ function startEdit(el, prefill){
       buildBody();
       if(targetIdx!=null&&targetIdx>=0){
         const newAll=getEditableCells();
+<<<<<<< HEAD
         if(newAll[targetIdx]){
           if(_doCarry) startEdit(newAll[targetIdx], rows[_carryIdx][_carryField]||'');
           else startEdit(newAll[targetIdx]);
         }
+=======
+        if(newAll[targetIdx])startEdit(newAll[targetIdx]);
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
       }
     }
     if(e.key==='Escape'){cancelEdit(activeCell);}
@@ -1107,6 +1219,7 @@ function commitEdit(ac, rebuild=true){
   let v=input.value.trim();
 
   if(isDate){
+<<<<<<< HEAD
     // 日数のみ入力 (1〜31) → 当月 MM/DD に自動変換（引取・納品列のみ）
     if(v && /^\d{1,2}$/.test(v) && (field==='ac'||field==='ad')){
       const _d=parseInt(v,10);
@@ -1115,6 +1228,10 @@ function commitEdit(ac, rebuild=true){
     if(v&&!/^\d{1,2}\/\d{1,2}$/.test(v)){toast('MM/DD 形式で入力（例 06/12）');cancelEdit(ac);return;}
     if(v){const[m,d]=v.split('/');v=m.padStart(2,'0')+'/'+d.padStart(2,'0');}
     if(!v && field==='af'){const orig=original.find(o=>o.no===rows[idx].no);v=orig?.af||null;}
+=======
+    if(v&&!/^\d{1,2}\/\d{1,2}$/.test(v)){toast('MM/DD 形式で入力（例 06/12）');cancelEdit(ac);return;}
+    if(v){const[m,d]=v.split('/');v=m.padStart(2,'0')+'/'+d.padStart(2,'0');}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
     rows[idx][field]=v||null;
     if(field==='ad'){ rows[idx].denno=null; autoAssignDenno(true); } // 納品日変更→その行のdennoをリセットして再採番
   } else if(field==='qty'){
@@ -1132,11 +1249,15 @@ function commitEdit(ac, rebuild=true){
     rows[idx].done=n;
   }
   activeCell=null;
+<<<<<<< HEAD
   if(rebuild){
     buildBody();
     if(field==='done'){ saveRows(); }
     else { markDirty(); toast('更新しました（保存ボタンで書き込み）'); }
   }
+=======
+  if(rebuild){buildBody();markDirty();toast('更新しました（保存ボタンで書き込み）');}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 }
 
 function cancelEdit(ac){
@@ -1165,8 +1286,14 @@ document.addEventListener('keydown',e=>{
 
 // ── 伝票No列 表示切替 ──
 function toggleDenno(){
+<<<<<<< HEAD
   // 後方互換用（直接呼び出し不要だが残しておく）
   toggleDetail();
+=======
+  const hidden=document.body.classList.toggle('hide-denno');
+  const btn=document.getElementById('denno-toggle-btn');
+  if(btn){btn.textContent=hidden?'伝票No ▶':'伝票No ▼';btn.classList.toggle('active',!hidden);}
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 }
 
 // ── 伝票No 自動採番 ──
@@ -1264,8 +1391,11 @@ function markClean(){
 }
 
 async function saveRows(){
+<<<<<<< HEAD
   // 編集中セルの値を保存前に確定（blur遅延コミット待ちで入力値が消えるのを防ぐ）
   if(activeCell){ try{ commitEdit(activeCell, false); }catch(_){} }
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   const btn = document.getElementById('save-btn');
   if(btn){ btn.disabled=true; btn.textContent='保存中…'; }
   try {
@@ -1359,6 +1489,7 @@ let _kirokuWin = null;
 
 const _normNmP = s => String(s||'').normalize('NFKC').replace(/\s+/g,'');
 
+<<<<<<< HEAD
 const SCHEDULE_BASE_YEAR = 2026; // 日程表の基準年（年明けの表に切り替えたらここを更新）
 // 納品日 mm/dd → yy/mm/dd。先頭日より月が戻っていたら翌年扱い（12→1の年またぎ対策）
 function adToYYMMDD(mmdd){
@@ -1372,16 +1503,22 @@ function adToYYMMDD(mmdd){
   if(m < baseM) y += 1;
   return String(y).slice(-2) + '/' + String(m).padStart(2,'0') + '/' + String(d).padStart(2,'0');
 }
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 function openKiroku(idx) {
   const r = rows[idx];
   const spec = (VFDB_SPEC && VFDB_SPEC[_normNmP(r.nm)]) || null;
   // meta は必要なフィールドだけ渡す（URL 長さ節約）
+<<<<<<< HEAD
   // 直前タスクのNoを渡す（準備時間算出に使用）
   let prevNo = null;
   for(let pi = idx - 1; pi >= 0; pi--) {
     if(showHidden || !isAutoHide(rows[pi])) { prevNo = rows[pi].no; break; }
   }
   const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: adToYYMMDD(r.ad), idx: idx, prevNo};
+=======
+  const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: r.ad||'', idx: idx};
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   const params = new URLSearchParams({
     meta: JSON.stringify(meta),
     spec: JSON.stringify(spec)
@@ -1636,11 +1773,14 @@ function showParallelMenu(x,y,idx){
   const left=x+160>vw?Math.max(0,vw-164):x;
   const top=y+280>vh?Math.max(0,vh-284):y;
   menu.style.left=left+'px';menu.style.top=top+'px';
+<<<<<<< HEAD
   // ── 分納（最上段）──
   const bn=document.createElement('div');bn.className='ctx-bunno';bn.textContent='⑂ 分納（納品を分ける）';
   bn.addEventListener('click',()=>{ doBunno(idx); closeParallelMenu(); });
   menu.appendChild(bn);
   const bsep=document.createElement('div');bsep.className='ctx-sep';menu.appendChild(bsep);
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
   const title=document.createElement('div');
   title.className='ctx-title';title.textContent='並行開始日を設定';
   menu.appendChild(title);
@@ -1674,6 +1814,7 @@ function closeParallelMenu(){
   if(_ctxMenu){_ctxMenu.remove();_ctxMenu=null;}
 }
 
+<<<<<<< HEAD
 // ── 分納：元行を「明細No-1」にリネームし、直下に「-2」(次番)のコピーを挿入 ──
 // 枝番ありが分納のしるし。納品日/数量はユーザーが各行を後から編集する想定。
 function doBunno(idx){
@@ -1693,6 +1834,8 @@ function doBunno(idx){
   toast('分納: '+r.no+' / '+copy.no+' に分割しました');
 }
 
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 // キーボードナビゲーション + Esc
 document.addEventListener('keydown', function(e) {
   const modal = document.getElementById('kirokuModal');
@@ -1740,8 +1883,12 @@ async function syncDoneFromKakou(rebuild=true){
     if(changed && rebuild && !activeCell) buildBody();
   }catch(e){ /* 加工記録サーバー未起動時などは静かにスキップ */ }
 }
+<<<<<<< HEAD
 // [自動上書き撤去] フォーカス時のdone自動同期を停止（加工記録保存時のみ反映する方針）
 // window.addEventListener('focus', ()=>syncDoneFromKakou());
+=======
+window.addEventListener('focus', ()=>syncDoneFromKakou());
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
 // ── 起動時: サーバーから nittei.json を取得して rows にマージ ──
 (async function initRows(){
@@ -1765,7 +1912,11 @@ async function syncDoneFromKakou(rebuild=true){
   autoAssignDenno(true);
   buildHead(); buildBody();
   syncSimUI();
+<<<<<<< HEAD
   // [自動上書き撤去] 起動時のdone自動同期を停止（手入力doneを保持。doneは加工記録保存時のみ反映）
+=======
+  syncDoneFromKakou();
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 })();
 </script>
 
@@ -1798,8 +1949,23 @@ async function syncDoneFromKakou(rebuild=true){
 })();
 </script>
 
+<<<<<<< HEAD
 <!-- 加工記録モーダル v2（別窓方式へ移行済み・抜け殻を空要素として閉じる） -->
 <div id="kirokuModal" class="kiroku-overlay"></div>
 
 </body>
 </html>
+=======
+<!-- 加工記録モーダル v2 -->
+<div id="kirokuModal" class="kiroku-overlay">
+  <div class="kiroku-pad2">
+    <div class="kr-head">
+      <span class="kr-title">加工記録</span>
+      <span class="kr-badge" id="k2-badge">—</span>
+      <span class="kr-nm" id="k2-nm-h">—</span>
+      <button class="kr-close" onclick="closeKiroku()">×</button>
+    </div>
+    <div class="kr-scroll">
+      <!-- サマリー行（日程表から自動取得 + 手入力） -->
+      <table class
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986

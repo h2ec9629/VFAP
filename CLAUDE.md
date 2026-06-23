@@ -34,11 +34,14 @@ git push
   - DB・xlsm・json等のデータファイルはOneDriveにのみ存在する（Git管理外）
   - コード編集はdev側で完結し、OneDriveには同期しない
 
+<<<<<<< HEAD
 ## ⚠️ 編集対象ファイルの原則
 
 **編集は必ず `C:\Users\user\Desktop\dev\VFAP` 側のファイルで行うこと。**
 OneDrive (`C:\Users\user\OneDrive\work\VFAP`) はレガシー兼バックアップであり、編集対象外。
 
+=======
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 ## ファイル編集ルール
 
 ローカル開発のため OneDrive 同期問題は発生しないが、

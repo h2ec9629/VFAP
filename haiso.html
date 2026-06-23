@@ -190,7 +190,11 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
       <div style="margin-top:10px;">
         <div class="sec-title">その他、支給依頼</div>
         <table>
+<<<<<<< HEAD
           <thead><tr><th>資材名</th><th style="width:50px;">数量</th><th style="width:70px;">支給希望日</th></tr></thead>
+=======
+          <thead><tr><th>箱品名</th><th style="width:50px;">数量</th><th style="width:70px;">支給希望日</th></tr></thead>
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
           <tbody id="sono-ta-tb">
             <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
             <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
@@ -381,6 +385,7 @@ function render(){
       tr.appendChild(mkTd(code,'code'));
       tr.appendChild(mkTd(g.nm,'nm'));
       tr.appendChild(mkTd(hakoNm,''));
+<<<<<<< HEAD
       const kyosuTd=document.createElement('td');
       kyosuTd.className='r';
       kyosuTd.contentEditable='true';
@@ -393,6 +398,9 @@ function render(){
         this.classList.toggle('edited',true);
       });
       tr.appendChild(kyosuTd);
+=======
+      tr.appendChild(mkTd(String(kyosu),'r'));
+>>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
       rtb.appendChild(tr);
     }
   }
