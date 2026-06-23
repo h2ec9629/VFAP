@@ -1529,6 +1529,28 @@ def _sync_kakozu_status(base_dir, nittei_rows: list):
 _SAVE_PORT = 8502
 _save_lock = threading.Lock()
 
+# ── Gist自動push（保存トリガー） ────────────────────────────────────────────
+_gist_push_running = threading.Lock()
+
+def _gist_push_async():
+    """nittei.json保存後にGistへpush。バックグラウンドスレッドで実行、多重起動はスキップ。"""
+    if not _gist_push_running.acquire(blocking=False):
+        return  # 前のpushが実行中 → スキップ
+    def _run():
+        try:
+            script = Path(__file__).resolve().parent / "nittei_to_gist.py"
+            if script.exists():
+                subprocess.run(
+                    [__import__("sys").executable, str(script)],
+                    timeout=30,
+                    capture_output=True,
+                )
+        except Exception:
+            pass
+        finally:
+            _gist_push_running.release()
+    threading.Thread(target=_run, daemon=True).start()
+
 class _SaveHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1557,6 +1579,7 @@ class _SaveHandler(BaseHTTPRequestHandler):
                     json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 # 加工完了依頼の sgt_status.json 同期（qty==done の依頼を加工済に更新）
                 _sync_kakozu_status(self.__class__.base_dir, data)
+            _gist_push_async()  # 保存後にGistへ自動push
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"ok":true}')
@@ -1769,6 +1792,7 @@ class _KakouHandler(BaseHTTPRequestHandler):
                     _save_case_json(self.__class__.base_dir, record)
                 except Exception:
                     pass
+            _gist_push_async()  # 保存・完了どちらでもGistへ自動push
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"ok":true}')
@@ -2307,6 +2331,7 @@ def sync_sgt_to_nittei() -> tuple:
     except Exception as e:
         return 0, f"nittei.json 書き込みエラー: {e}"
 
+    _gist_push_async()  # SGT同期後にGistへ自動push
     return updated, f"{updated} 件を SGT から同期しました"
 
 
