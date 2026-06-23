@@ -1,56 +1,59 @@
 @echo off
+chcp 65001 > nul
 cd /d "%~dp0"
-set "SGT_BASE_DIR=%USERPROFILE%\OneDrive\work\SGT_cloud"
 
-title SGT Management System
+title VFAP - starting up...
 
 echo ============================================================
-echo  SGT Management System - starting up...
-echo  Browser will open automatically when ready.
-echo  Close this window to stop the server.
+echo  VFAP - GitHub最新版を取得中...
+echo ============================================================
+echo.
+
+REM Gitがなければスキップ
+git --version > nul 2>&1
+if errorlevel 1 goto skip_git
+
+REM PATを読み込む
+if not exist "token\VFAPtoken.txt" goto skip_git
+set /p PAT=<token\VFAPtoken.txt
+
+REM .gitがあればpull、なければclone
+if exist ".git" (
+    echo [git] 最新版を取得中...
+    git remote set-url origin https://h2ec9629:%PAT%@github.com/h2ec9629/VFAP.git
+    git pull origin master
+) else (
+    echo [git] 初回セットアップ中...
+    git clone https://h2ec9629:%PAT%@github.com/h2ec9629/VFAP.git .
+)
+echo.
+
+:skip_git
+
+echo ============================================================
+echo  VFAP - アプリ起動中...
+echo  ブラウザが自動で開きます。
+echo  停止するにはこのウィンドウを閉じてください。
 echo ============================================================
 echo.
 
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python not found. Install Python or add it to PATH.
+    echo [ERROR] Python が見つかりません。インストールしてPATHを通してください。
     pause
     exit /b 1
 )
 
 python -c "import streamlit" >nul 2>&1
 if errorlevel 1 (
-    echo First-time setup: installing required packages...
+    echo 初回セットアップ: パッケージをインストール中...
     python -m pip install streamlit openpyxl pandas
 )
 
-echo Starting Streamlit server...
-
-:: Start Streamlit in background (minimized window)
+echo Streamlit 起動中...
 start "" /min python -m streamlit run app.py --server.headless true
 
-:: Wait until port 8501 is ready
 :wait_loop
 timeout /t 1 /nobreak >nul
 python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501', timeout=1)" >nul 2>&1
-if errorlevel 1 goto wait_loop
-
-echo.
-echo  Server ready! Opening browser...
-start "" "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --app=http://localhost:8501
-
-echo.
-echo ============================================================
-echo  App is running. Close this window to stop the server.
-echo ============================================================
-
-:: Keep alive loop
-:running_loop
-timeout /t 5 /nobreak >nul
-python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501', timeout=1)" >nul 2>&1
-if errorlevel 1 (
-    echo Server stopped.
-    pause
-    exit /b 0
-)
-goto running_loop
+if errorle
