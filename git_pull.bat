@@ -1,9 +1,11 @@
 @echo off
-cd /d C:\Users\mmtm9\Desktop\dev\VFAP
+set TARGET=%USERPROFILE%\Desktop\dev\VFAP
+set TOKENFILE=%~dp0VFAPtoken.txt
+
 echo =============================
 echo  VFAP git pull
 echo =============================
-git pull origin master
-echo.
-echo Done! Press any key to close...
-pause > nul
+
+if not exist "%TARGET%\.git" (
+    echo ERROR: .git not found in %TARGET%
+  
