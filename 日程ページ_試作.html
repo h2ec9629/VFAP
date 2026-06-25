@@ -473,18 +473,13 @@ function getColOffset(){
   return (new Date().getHours() < 12) ? 4 : 0;
 }
 function onSim4Change(v){
-  const isAfternoon=(new Date().getHours()>=12);
   sim4=!!v;
-  // 午後は+8がOFFの間は+4を強制ON
-  if(isAfternoon && !sim8) sim4=true;
   if(sim4) sim8=false;
   syncSimUI(); buildHead(); buildBody();
 }
 function onSim8Change(v){
-  const isAfternoon=(new Date().getHours()>=12);
   sim8=!!v;
   if(sim8) sim4=false;
-  else if(isAfternoon) sim4=true; // +8をOFFにしたら午後は+4を自動復帰
   syncSimUI(); buildHead(); buildBody();
 }
 function syncSimUI(){
@@ -572,13 +567,10 @@ function buildBody(){
     let startH, endH;
     if(r.parallelFrom){
       const _pi=days.findIndex(d=>d[0]===r.parallelFrom);
-      // 開始日を手動変更した行(parallelFrom)は、その開始位置に固定表示する。
-      // -BAR_OFFSET は描画時の +BAR_OFFSET を打ち消すための仕掛け。
-      // これにより +4h/+8h シミュを切ってもこの行だけは動かない（＝固定）。
-      // ★この -BAR_OFFSET は消さないこと（消すと固定行がシミュで動いてしまう）
-      startH=(_pi>=0)?(_pi*8-BAR_OFFSET):cumH;
+      // parallelFrom 行も +4h/+8h シミュ連動でバーをずらす（-BAR_OFFSET 除去）
+      startH=(_pi>=0)?(_pi*8):cumH;
       endH=startH+remaining;
-      cumH=endH; // 速めた行の終わりから後続を直列で積み直す（アンカー＆再連結）
+      cumH=endH;
     }else{
       startH=cumH;
       cumH+=remaining;
