@@ -33,7 +33,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   .page-wrap{padding:12px;}
   .page-title{font-size:14px;font-weight:700;text-align:center;margin-bottom:4px;color:#e0e0e0;}
   .hero{text-align:center;margin-bottom:10px;}
-  .hero-co{font-size:16px;font-weight:700;color:#fff;letter-spacing:1px;}
+  .hero-co{display:none;}
   .hero-co-en{font-size:9px;color:#e8821e;margin-left:8px;letter-spacing:2px;}
   .print-foot{display:none;}
   .sec-title{font-size:12px;font-weight:700;background:#242424;color:#ccc;
@@ -65,6 +65,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   td.pick-qty:focus{outline:1px solid #e86a00;background:#1e1e1e;color:#fff;}
   td.pick-qty.edited{color:#fff;font-weight:600;}
   tr.day-end td{border-bottom:2px solid #555!important;}
+  td.hako-muted{color:#444;}
   .biko{border:1px solid #252525;min-height:64px;padding:6px;background:#1c1c1c;color:#e0e0e0;font-size:11px;cursor:text;}
   .biko:focus{outline:1px solid #e86a00;color:#e0e0e0;}
   .biko:empty::before{content:attr(data-placeholder);color:#555;pointer-events:none;}
@@ -126,14 +127,12 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
              font-family:inherit;color:#1a1a1a;-webkit-appearance:none;appearance:none;}
   .biko{border:1px solid #d0d0d0;flex:1;min-height:34mm;background:#fff;}
   td.nm,td.nm-sm{white-space:normal;}
+  td.hako-muted{color:#bbb;}
   /* フッター：細い罫＋会社情報 */
   .print-foot{display:block;margin-top:7px;padding-top:5px;border-top:1px solid #1f1f1f;
               font-size:7.5pt;color:#555;text-align:center;letter-spacing:1px;font-weight:400;
               -webkit-print-color-adjust:exact;print-color-adjust:exact;}
-  #rtbl th:nth-child(1){width:16mm;}
-  #rtbl th:nth-child(2){width:22mm;}
-  #rtbl th:nth-child(3){width:28mm;}
-  #rtbl th:nth-child(4){width:10mm;}
+
 }
 </style>
 </head>
@@ -153,56 +152,44 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
     <div class="hero-co">黒部工業株式会社</div>
     <div class="page-title" id="page-title">納品・引取日程</div>
   </div>
-  <div class="two-col">
+  <div>
+    <div class="sec-title">納品　／　基材引取</div>
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2" style="width:54px;">日付</th>
+          <th colspan="3" class="sep">納　品</th>
+          <th colspan="4">基材引取</th>
+        </tr>
+        <tr>
+          <th style="width:52px;">明細No</th>
+          <th>品名</th>
+          <th class="sep" style="width:46px;">注文数</th>
+          <th>品名（材料）</th>
+          <th style="width:44px;">数量</th>
+          <th>梱包箱</th>
+          <th style="width:44px;">支給数</th>
+        </tr>
+      </thead>
+      <tbody id="left-tb"></tbody>
+    </table>
+  </div>
+  <div class="two-col" style="margin-top:10px;">
     <div>
-      <div class="sec-title">納品　／　基材引取</div>
-      <table>
-        <thead>
-          <tr>
-            <th rowspan="2" style="width:54px;">日付</th>
-            <th colspan="3" class="sep">納　品</th>
-            <th colspan="2">基材引取</th>
-          </tr>
-          <tr>
-            <th style="width:52px;">明細No</th>
-            <th>品名</th>
-            <th class="sep" style="width:46px;">注文数</th>
-            <th>品名（材料）</th>
-            <th style="width:44px;">数量</th>
-          </tr>
-        </thead>
-        <tbody id="left-tb"></tbody>
-      </table>
+      <div class="sec-title">備考</div>
+      <div class="biko" contenteditable="true" data-placeholder="備考を入力…"></div>
     </div>
     <div>
-      <div class="sec-title">梱包資材　支給数量</div>
-      <table id="rtbl">
-        <thead>
-          <tr>
-            <th style="width:63px;">品目コード</th>
-            <th style="width:91px;">品名</th>
-            <th>梱包箱品名</th>
-            <th style="width:44px;">供数</th>
-          </tr>
-        </thead>
-        <tbody id="right-tb"></tbody>
+      <div class="sec-title">その他、支給依頼（梱包資材）</div>
+      <table>
+        <thead><tr><th>資材名</th><th style="width:50px;">数量</th><th style="width:70px;">支給希望日</th></tr></thead>
+        <tbody id="sono-ta-tb">
+          <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+          <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+          <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+          <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+        </tbody>
       </table>
-      <div style="margin-top:10px;">
-        <div class="sec-title">その他、支給依頼</div>
-        <table>
-          <thead><tr><th>資材名</th><th style="width:50px;">数量</th><th style="width:70px;">支給希望日</th></tr></thead>
-          <tbody id="sono-ta-tb">
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div style="margin-top:10px;">
-        <div class="sec-title">備考</div>
-        <div class="biko" contenteditable="true" data-placeholder="備考を入力…"></div>
-      </div>
     </div>
   </div>
   <div class="print-foot">〒938-0005　富山県下新川郡入善町新屋2220　／　TEL 0765-78-2383　FAX 0765-78-2384</div>
@@ -212,6 +199,7 @@ const NITTEI = [];
 const VFDB_LIST = [];
 
 function normName(s){return s?String(s).replace(/[\s　 ]+/g,''):''}
+function trimMatName(s){return s?String(s).replace(/\s*L=?\d+(\.\d+)?/g,'').trim():''}
 const vMap={};
 for(const r of VFDB_LIST){const k=normName(r['品名']);if(k)vMap[k]=r;}
 
@@ -288,20 +276,52 @@ function render(){
     const key=toMMDD(d);
     const wday=WDAYS[d.getDay()];
     const dels=delMap[key];
-    // 基材引取：同一材料名を合算
+    // 基材引取：hakoNmでグループ化（rowspan）、matNameは個別表示
+    const PICK_MUTE_PFX=['灯具-3','LED-A888','H型ジョイナー端材'].map(normName);
+    const isMuted=h=>PICK_MUTE_PFX.some(m=>normName(h).startsWith(m));
     const pickRaw=pickMap[key];
-    const pickAgg=new Map();
+    // Step1: hakoNm → {entries:[{matName,qty}], irisu, muted, totalQty}
+    const hakoGroups=new Map();
     for(const p of pickRaw){
       const vf=vMap[normName(p.nm)]||{};
-      const matName=vf['備考']||p.nm||'';
+      const matName=trimMatName(vf['備考']||p.nm||'');
       const qty=Number(p.qty)||0;
-      if(pickAgg.has(matName)){
-        pickAgg.get(matName).qty+=qty;
-      }else{
-        pickAgg.set(matName,{matName,qty});
+      const hakoNm=vf['箱名']||'—';
+      const irisu=parseFloat(vf['梱包'])||0;
+      const muted=isMuted(hakoNm);
+      const kyukyu=p.kyukyu!=null?p.kyukyu:null;
+      if(!hakoGroups.has(hakoNm))hakoGroups.set(hakoNm,{entries:[],irisu,muted,totalQty:0,kyukyu:null});
+      const g=hakoGroups.get(hakoNm);
+      g.totalQty+=qty;
+      if(g.kyukyu==null&&kyukyu!=null)g.kyukyu=kyukyu;
+      const ex=g.entries.find(e=>e.matName===matName);
+      if(ex)ex.qty+=qty; else g.entries.push({matName,qty});
+    }
+    // Step2: flatten → picks[] with hakoNm rowspan情報
+    const picks=[];
+    for(const [hakoNm,g] of hakoGroups){
+      const shosu=g.muted?'—':(g.irisu>0?Math.ceil(g.totalQty/g.irisu):'—');
+      g.entries.forEach((e,idx)=>{
+        picks.push({matName:e.matName,qty:e.qty,hakoNm,showHako:idx===0,hakoRowspan:g.entries.length,shosu,muted:g.muted,showMatName:true,matNameRowspan:1,kyukyu:g.kyukyu});
+      });
+    }
+    // Step3: 連続する同一matNameにrowspanを付与
+    let pi=0;
+    while(pi<picks.length){
+      const mn=picks[pi].matName;
+      let pj=pi+1;
+      while(pj<picks.length&&picks[pj].matName===mn)pj++;
+      picks[pi].matNameRowspan=pj-pi;
+      for(let pk=pi+1;pk<pj;pk++)picks[pk].showMatName=false;
+      pi=pj;
+    }
+    // Step4: 灯具カバー の数量を同一品名で合算し100/200単位に切り上げ
+    const toguCoverTotals=new Map();
+    for(const p of picks){
+      if(p.matName&&p.matName.includes('灯具カバー')){
+        toguCoverTotals.set(p.matName,(toguCoverTotals.get(p.matName)||0)+(p.qty||0));
       }
     }
-    const picks=[...pickAgg.values()];
     const rows=Math.max(1,dels.length,picks.length);
     for(let i=0;i<rows;i++){
       const tr=document.createElement('tr');
@@ -326,25 +346,40 @@ function render(){
       }
       const pick=picks[i];
       if(pick){
-        tr.appendChild(mkTd(pick.matName,'mat nm'));
-        const qtyTd=document.createElement('td');
-        qtyTd.className='pick-qty';
-        qtyTd.contentEditable='true';
-        qtyTd.textContent='要数';
-        qtyTd.addEventListener('focus',function(){
-          if(this.textContent==='要数')this.textContent='';
-        });
-        qtyTd.addEventListener('blur',function(){
-          if(!this.textContent.trim())this.textContent='要数';
-          this.classList.toggle('edited',this.textContent!=='要数');
-        });
-        qtyTd.addEventListener('keydown',function(e){
-          if(e.key==='Enter'){e.preventDefault();this.blur();}
-        });
-        tr.appendChild(qtyTd);
+        if(pick.showMatName){
+          const mntd=mkTd(pick.matName,'mat nm');
+          if(pick.matNameRowspan>1)mntd.rowSpan=pick.matNameRowspan;
+          tr.appendChild(mntd);
+        }
+        const isShowcase=pick.matName&&(pick.matName.includes('ショーケース')||pick.matName.includes('ｼｮｰｹｰｽ'));
+        const isToguCover=pick.matName&&pick.matName.includes('灯具カバー');
+        let qtyDisp='';
+        if(pick.qty!=null){
+          if(isShowcase){
+            qtyDisp=pick.kyukyu?Number(pick.kyukyu).toLocaleString():'';
+          }else if(isToguCover){
+            if(pick.showMatName){
+              const tot=toguCoverTotals.get(pick.matName)||0;
+              qtyDisp=String(Math.ceil(tot/100)*100);
+            }
+          }else{
+            qtyDisp='要数';
+          }
+        }
+        tr.appendChild(mkTd(qtyDisp,'qty r'));
+        if(pick.showHako){
+          const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
+          if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
+          tr.appendChild(hakTd);
+          const shosuTd=mkTd(String(pick.shosu),'r');
+          if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
+          tr.appendChild(shosuTd);
+        }
       }else if(i===0&&picks.length===0){
-        const ptd=mkTd('引取なし','empty');ptd.colSpan=2;tr.appendChild(ptd);
+        const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
       }else{
+        tr.appendChild(mkTd('',''));
+        tr.appendChild(mkTd('',''));
         tr.appendChild(mkTd('',''));
         tr.appendChild(mkTd('',''));
       }
@@ -353,49 +388,6 @@ function render(){
     }
   }
 
-  // 右テーブル（梱包資材）― 引取ベース
-  const rtb=document.getElementById('right-tb');
-  rtb.innerHTML='';
-  const allPicks=days.flatMap(d=>pickMap[toMMDD(d)]);
-  if(allPicks.length===0){
-    const tr=document.createElement('tr');
-    const ptd=mkTd('この週の引取予定なし','empty');ptd.colSpan=4;
-    tr.appendChild(ptd);rtb.appendChild(tr);
-  }else{
-    const HAKO_MUTE=new Set(['灯具-3　L=970','LED-A888']);
-    // 品名でグループ化して数量合算
-    const grouped=new Map();
-    for(const r of allPicks){
-      const key=normName(r.nm);
-      if(!grouped.has(key)) grouped.set(key,{nm:r.nm,qty:0});
-      grouped.get(key).qty+=Number(r.qty)||0;
-    }
-    for(const [key,g] of grouped){
-      const vf=vMap[key]||{};
-      const code=vf['品目コード']||'';
-      const hakoNm=vf['箱名']||'—';
-      const irisu=parseFloat(vf['梱包'])||0;
-      const qty=g.qty;
-      const kyosu=HAKO_MUTE.has(hakoNm)?'—':(irisu>0?Math.ceil(qty/irisu):(qty>0?'—':''));
-      const tr=document.createElement('tr');
-      tr.appendChild(mkTd(code,'code'));
-      tr.appendChild(mkTd(g.nm,'nm'));
-      tr.appendChild(mkTd(hakoNm,''));
-      const kyosuTd=document.createElement('td');
-      kyosuTd.className='r';
-      kyosuTd.contentEditable='true';
-      kyosuTd.textContent=String(kyosu);
-      kyosuTd.addEventListener('keydown',function(e){
-        if(e.key==='Enter'){e.preventDefault();this.blur();}
-      });
-      kyosuTd.addEventListener('blur',function(){
-        if(!this.textContent.trim())this.textContent='—';
-        this.classList.toggle('edited',true);
-      });
-      tr.appendChild(kyosuTd);
-      rtb.appendChild(tr);
-    }
-  }
 }
 document.addEventListener('DOMContentLoaded', setThisWeek);
 </script>

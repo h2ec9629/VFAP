@@ -274,6 +274,23 @@
 
   /* 加工Lotを梱包方法の底辺に揃えて下寄せ */
   .kr-lot-bottom{margin-top:auto;}
+
+  /* 端数トグル */
+  .kr-kakou-cell{padding:0 !important;}
+  .kr-kakou-wrap{display:flex;align-items:stretch;height:100%;min-height:42px;}
+  .kr-kakou-wrap input{flex:1;min-width:0;width:auto !important;border-radius:5px 0 0 5px !important;}
+  .kr-hazusu-btn{
+    flex-shrink:0;border:none;border-left:1px solid #b0b0b0;
+    background:#c8c8c8;color:#666;font-size:10px;cursor:pointer;
+    padding:0 5px;line-height:1;white-space:nowrap;border-radius:0 5px 5px 0;
+    font-family:inherit;transition:background .15s,color .15s;
+  }
+  .kr-hazusu-btn:hover{background:#aaa;color:#333;}
+  .kr-hazusu-btn.on{background:#d97757;color:#fff;font-weight:700;border-left-color:#c06540;}
+  /* 端数オン行：加工数セルを視覚的に薄く */
+  tr:has(.kr-hazusu-btn.on) td.kr-kakou-cell .kr-kakou-wrap input{
+    color:#888 !important;background:#c0c0c0 !important;
+  }
 </style>
 </head>
 <body>
@@ -757,7 +774,7 @@ function _addKrRow(data, ri) {
       <td class="ac"></td>
       <td class="ac"></td>
       <td class="ac"></td>
-      <td><input type="text" value="${_kv(data?.kakou_su)}"    data-row="0" data-col="4" style="width:56px" oninput="updateKrSummary()"></td>
+      <td class="kr-kakou-cell"><div class="kr-kakou-wrap"><input type="text" value="${_kv(data?.kakou_su)}" data-row="0" data-col="4" oninput="updateKrSummary()"><button type="button" class="kr-hazusu-btn${data?.hazusu?'  on':''}" onclick="this.classList.toggle('on');updateKrSummary()" title="端数：この行を使用Lot/加工数/基材換算から除外">端数</button></div></td>
       <td class="ac kr-lot-sep" id="k2-lh-lot-0">—</td>
       <td class="ac" id="k2-lh-su-0">—</td>
       <td class="ac" id="k2-lh-kans-0">—</td>
@@ -774,7 +791,7 @@ function _addKrRow(data, ri) {
         </div>
       </td>
       <td><input type="text" value="${_kvKeis(data?.keisoku)}" data-row="${ri}" data-col="3" data-ts="${data?.keisoku_ts||''}" style="width:56px" oninput="checkKeisokuRange(${ri})" onchange="onKeisokuCommit(this)"></td>
-      <td><input type="text" value="${_kv(data?.kakou_su)}"    data-row="${ri}" data-col="4" style="width:56px" oninput="updateKrSummary()"></td>
+      <td class="kr-kakou-cell"><div class="kr-kakou-wrap"><input type="text" value="${_kv(data?.kakou_su)}" data-row="${ri}" data-col="4" oninput="updateKrSummary()"><button type="button" class="kr-hazusu-btn${data?.hazusu?' on':''}" onclick="this.classList.toggle('on');updateKrSummary()" title="端数：この行を使用Lot/加工数/基材換算から除外">端数</button></div></td>
       ${ri < 5
         ? `<td class="ac kr-lot-sep" id="k2-lh-lot-${ri}">—</td><td class="ac" id="k2-lh-su-${ri}">—</td><td class="ac" id="k2-lh-kans-${ri}">—</td>`
         : `<td class="ac kr-lot-sep"></td><td class="ac"></td><td class="ac"></td>`}
@@ -797,8 +814,9 @@ function calcKizaiKans(){
     const klot = tr.querySelector('input[data-col="1"]');
     const ri   = parseInt(kin?.dataset.row ?? '-1', 10);
     const kakou = _kzNum(kin?.value);
-    const isHazai = (klot?.value||'').trim() === '端材';
-    if(isHazai){
+    const isHazai   = (klot?.value||'').trim() === '端材';
+    const isHazusu  = tr.querySelector('.kr-hazusu-btn')?.classList.contains('on');
+    if(isHazai || isHazusu){
       if(isFinite(kakou) && kakou > 0) hazaiSum += kakou;
     } else if(isFinite(kakou) && kakou > 0 && isFinite(toru) && toru > 0){
       const v = kakou / toru;
@@ -881,10 +899,12 @@ function updateKrSummary() {
   // ロット使用数集計（計測Lotでグループ集計）
   const lotMap = new Map();
   document.querySelectorAll('#k2-daily-body tr, #k2-hoten-body tr').forEach(tr => {
-    const lotIn   = tr.querySelector('input[data-col="1"]');
-    const kakouIn = tr.querySelector('input[data-col="4"]');
+    const lotIn    = tr.querySelector('input[data-col="1"]');
+    const kakouIn  = tr.querySelector('input[data-col="4"]');
+    const hazusuOn = tr.querySelector('.kr-hazusu-btn')?.classList.contains('on');
     const lot = lotIn?.value?.trim();
     if(!lot || lotIn?.dataset?.draft === '1') return;
+    if(hazusuOn) return;  // 端数オン：使用Lot/加工数/基材換算から除外
     const su = parseInt(kakouIn?.value||'0', 10) || 0;
     lotMap.set(lot, (lotMap.get(lot) || 0) + su);
   });
@@ -969,7 +989,7 @@ function lotFmt(raw){
   let out='';
   for(let i=0;i<raw.length;i++){
     if(i===2||i===3) out+=' ';
-    if(i===5) out+='-';
+    if(i===5 && /\d/.test(raw[i])) out+='-';
     out+=raw[i];
   }
   return out;
@@ -1073,8 +1093,9 @@ function _buildRecord() {
     // 作業日・加工数が空でも、計測Lot/温度/計測値のどれかが入っていれば行を残す
     const _hasMeas = dsv(inLot) || dnv(inOndo) || dnv(inKeisoku);
     if(!sakugyobi && !kakou_su && !_hasMeas) return;
+    const hazusu = tr.querySelector('.kr-hazusu-btn')?.classList.contains('on') ? 1 : 0;
     daily.push({ row_idx: rowIdx, sakugyobi, keisoku_lot: dsv(inLot),
-      ondo: dnv(inOndo), keisoku: dnv(inKeisoku), kakou_su,
+      ondo: dnv(inOndo), keisoku: dnv(inKeisoku), kakou_su, hazusu,
       keisoku_ts: (inKeisoku?.dataset?.ts || '') });
   });
   const lots = [];
@@ -1195,12 +1216,14 @@ document.addEventListener('focusout', e => {
   if(/^k2-lot-\d+$/.test(el.id)){
     normalizeLotDate(el); updateNyukoBi();
     const _raw = el.value.replace(/[ -]/g,'');
-    if(_raw.length === 6){ el.value = lotFmt(_raw.slice(0,5) + '0' + _raw.slice(5)); }
+    if(_raw.length === 6 && /\d/.test(_raw[5])){ el.value = lotFmt(_raw.slice(0,5) + '0' + _raw.slice(5)); }
+    else if(_raw.length === 6){ el.value = lotFmt(_raw); }
   }
-  // 計測Lot列：6桁で終わる場合は先頭に0を挿入 → 0埋め後に使用Lot列を再集計
+  // 計測Lot列：6桁で終わる場合は先頭に0を挿入（末尾が数字のときのみ） → 0埋め後に使用Lot列を再集計
   if(el.dataset && el.dataset.col === '1'){
     const raw = el.value.replace(/[ -]/g,'');
-    if(raw.length === 6){ el.value = lotFmt(raw.slice(0,5) + '0' + raw.slice(5)); }
+    if(raw.length === 6 && /\d/.test(raw[5])){ el.value = lotFmt(raw.slice(0,5) + '0' + raw.slice(5)); }
+    else if(raw.length === 6){ el.value = lotFmt(raw); }
     updateKrSummary();
   }
 });
