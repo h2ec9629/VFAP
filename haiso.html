@@ -65,7 +65,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   td.pick-qty{text-align:right;color:#f5c97b;cursor:text;min-width:44px;}
   td.pick-qty:focus{outline:1px solid #e86a00;background:#1e1e1e;color:#fff;}
   td.pick-qty.edited{color:#fff;font-weight:600;}
-  tr.day-end td{border-bottom:2px solid #555!important;}
+  tr.day-end td, td.day-end-cell{border-bottom:2px solid #555!important;}
   td.hako-muted{color:#444;}
   .biko{border:1px solid #252525;min-height:64px;padding:6px;background:#1c1c1c;color:#e0e0e0;font-size:11px;cursor:text;}
   .biko:focus{outline:1px solid #e86a00;color:#e0e0e0;}
@@ -113,7 +113,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
             -webkit-print-color-adjust:exact;print-color-adjust:exact;}
   td.sep{border-right:2px solid #999!important;}
   /* 日区切り：下罫を太く */
-  tr.day-end td{border-bottom:2px solid #4d4d4d!important;
+  tr.day-end td, td.day-end-cell{border-bottom:2px solid #4d4d4d!important;
      -webkit-print-color-adjust:exact;print-color-adjust:exact;}
   /* 色は使わず太字で強弱（数量系を強調） */
   td.qty{color:#1a1a1a!important;font-weight:700;}
@@ -327,11 +327,13 @@ function render(){
       }
     }
     const rows=Math.max(1,dels.length,picks.length);
+    const dayEndCells=[];
     for(let i=0;i<rows;i++){
       const tr=document.createElement('tr');
       if(i===0){
         const dtd=mkTd(`${key}\n(${wday})`,'date-c');
         dtd.rowSpan=rows;
+        dayEndCells.push(dtd); // date-c は常に最終行まで span
         tr.appendChild(dtd);
       }
       const del=dels[i];
@@ -352,7 +354,10 @@ function render(){
       if(pick){
         if(pick.showMatName){
           const mntd=mkTd(pick.matName,'mat nm');
-          if(pick.matNameRowspan>1)mntd.rowSpan=pick.matNameRowspan;
+          if(pick.matNameRowspan>1){
+            mntd.rowSpan=pick.matNameRowspan;
+            if(i+pick.matNameRowspan-1===rows-1)dayEndCells.push(mntd);
+          }
           tr.appendChild(mntd);
         }
         const isShowcase=pick.matName&&(pick.matName.includes('ショーケース')||pick.matName.includes('ｼｮｰｹｰｽ'));
@@ -373,26 +378,6 @@ function render(){
         tr.appendChild(mkTd(qtyDisp,'qty r'));
         if(pick.showHako){
           const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
-          if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
-          tr.appendChild(hakTd);
-          const shosuTd=mkTd(String(pick.shosu),'r');
-          if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
-          tr.appendChild(shosuTd);
-        }
-      }else if(i===0&&picks.length===0){
-        const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
-      }else{
-        tr.appendChild(mkTd('',''));
-        tr.appendChild(mkTd('',''));
-        tr.appendChild(mkTd('',''));
-        tr.appendChild(mkTd('',''));
-      }
-      if(i===rows-1) tr.classList.add('day-end');
-      ltb.appendChild(tr);
-    }
-  }
-
-}
-document.addEventListener('DOMContentLoaded', setThisWeek);
-</script>
-</bod                                            
+          if(pick.hakoRowspan>1){
+            hakTd.rowSpan=pick.hakoRowspan;
+            if(i+p
