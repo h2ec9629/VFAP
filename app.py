@@ -2822,12 +2822,15 @@ if page_sel == "加工記録":
 
     st.divider()
 
-    # 一覧テーブル（明細Noクリックで記入ページを開く）
-    import urllib.parse as _up
-    import streamlit.components.v1 as _kcomp
+    _tab_list, _tab_nippo = st.tabs(["📋 一覧", "📅 日報"])
 
-    _rows_html = ""
-    for rec in all_kakou:
+    with _tab_list:
+      # 一覧テーブル（明細Noクリックで記入ページを開く）
+      import urllib.parse as _up
+      import streamlit.components.v1 as _kcomp
+
+      _rows_html = ""
+      for rec in all_kakou:
         daily   = rec.get("daily", [])
         kakou_s = sum(d.get("kakou_su", 0) for d in daily)
         furyou  = rec.get("furyou", {})
@@ -2850,58 +2853,170 @@ if page_sel == "加工記録":
             f'</tr>'
         )
 
-    _table_html = f"""<style>
-      body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
-      table{{border-collapse:collapse;width:100%;}}
-      th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 8px;border-bottom:2px solid #444;
-          text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
-      .kr{{border-bottom:1px solid #2a2a2a;cursor:pointer;}}
-      .kr:hover td{{background:rgba(255,140,40,0.12)!important;}}
-      td{{padding:5px 8px;border-right:1px solid #2a2a2a;white-space:nowrap;}}
-      .td-no{{color:#d97757;font-weight:600;text-decoration:underline;}}
-    </style>
-    <div style="overflow:auto;max-height:540px;">
-    <table>
-      <thead><tr>
-        <th>明細No ↗</th><th>品名</th><th>伝票</th><th>作業者</th>
-        <th>加工Lot</th><th>箱数</th><th>加工数計</th><th>不良計</th><th>更新日時</th>
-      </tr></thead>
-      <tbody>{_rows_html}</tbody>
-    </table></div>"""
-    _kcomp.html(_table_html, height=600, scrolling=False)
+      _table_html = f"""<style>
+        body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
+        table{{border-collapse:collapse;width:100%;}}
+        th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 8px;border-bottom:2px solid #444;
+            text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
+        .kr{{border-bottom:1px solid #2a2a2a;cursor:pointer;}}
+        .kr:hover td{{background:rgba(255,140,40,0.12)!important;}}
+        td{{padding:5px 8px;border-right:1px solid #2a2a2a;white-space:nowrap;}}
+        .td-no{{color:#d97757;font-weight:600;text-decoration:underline;}}
+      </style>
+      <div style="overflow:auto;max-height:540px;">
+      <table>
+        <thead><tr>
+          <th>明細No ↗</th><th>品名</th><th>伝票</th><th>作業者</th>
+          <th>加工Lot</th><th>箱数</th><th>加工数計</th><th>不良計</th><th>更新日時</th>
+        </tr></thead>
+        <tbody>{_rows_html}</tbody>
+      </table></div>"""
+      _kcomp.html(_table_html, height=600, scrolling=False)
 
-    # 詳細展開（expander）
-    st.divider()
-    st.markdown("#### 詳細")
-    for rec in all_kakou:
-        no   = rec.get("meisai_no", "")
-        nm   = rec.get("hinmei", "")
-        with st.expander(f"明細No {no}  {nm}", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown(f"**作業者**　{rec.get('sakusha','')}  ")
-                st.markdown(f"**加工Lot**　{rec.get('kakou_lot','')}  ")
-            with c2:
-                st.markdown(f"**箱数**　{rec.get('hako_su','')}")
-                st.markdown(f"**入重日**　{rec.get('irejubi','')}  入重数　{rec.get('ireju_su','')}")
-            with c3:
-                st.markdown(f"**備考**　{rec.get('biko','')}")
-            # 作業明細
-            daily = rec.get("daily", [])
-            if daily:
-                df_d = pd.DataFrame(daily).rename(columns={
-                    "sakugyobi":"作業日","ondo":"温度(℃)",
-                    "kakou_su":"加工数","hazai":"端材使用"
-                })
-                st.dataframe(df_d, use_container_width=True, hide_index=True)
-            # 不良内訳
-            fu = rec.get("furyou", {})
-            fu_map = {"kizu":"キズ","kubomi":"凹み","imono":"異物","kake":"欠け",
-                      "meyani":"メヤニ","peko":"ペコツキ","osen":"汚損",
-                      "keijo":"形状異常","sonota":"その他"}
-            fu_rows = [{lbl: fu.get(k, 0) for k, lbl in fu_map.items()}]
-            fu_rows[0]["合計"] = sum(fu.get(k,0) for k in fu_map)
-            st.dataframe(pd.DataFrame(fu_rows), use_container_width=True, hide_index=True)
+      # 詳細展開（expander）
+      st.divider()
+      st.markdown("#### 詳細")
+      for rec in all_kakou:
+          no   = rec.get("meisai_no", "")
+          nm   = rec.get("hinmei", "")
+          with st.expander(f"明細No {no}  {nm}", expanded=False):
+              c1, c2, c3 = st.columns(3)
+              with c1:
+                  st.markdown(f"**作業者**　{rec.get('sakusha','')}  ")
+                  st.markdown(f"**加工Lot**　{rec.get('kakou_lot','')}  ")
+              with c2:
+                  st.markdown(f"**箱数**　{rec.get('hako_su','')}")
+                  st.markdown(f"**入重日**　{rec.get('irejubi','')}  入重数　{rec.get('ireju_su','')}")
+              with c3:
+                  st.markdown(f"**備考**　{rec.get('biko','')}")
+              # 作業明細
+              daily = rec.get("daily", [])
+              if daily:
+                  df_d = pd.DataFrame(daily).rename(columns={
+                      "sakugyobi":"作業日","ondo":"温度(℃)",
+                      "kakou_su":"加工数","hazai":"端材使用"
+                  })
+                  st.dataframe(df_d, use_container_width=True, hide_index=True)
+              # 不良内訳
+              fu = rec.get("furyou", {})
+              fu_map = {"kizu":"キズ","kubomi":"凹み","imono":"異物","kake":"欠け",
+                        "meyani":"メヤニ","peko":"ペコツキ","osen":"汚損",
+                        "keijo":"形状異常","sonota":"その他"}
+              fu_rows = [{lbl: fu.get(k, 0) for k, lbl in fu_map.items()}]
+              fu_rows[0]["合計"] = sum(fu.get(k,0) for k in fu_map)
+              st.dataframe(pd.DataFrame(fu_rows), use_container_width=True, hide_index=True)
+
+    # ── 日報タブ ──────────────────────────────────────────
+    with _tab_nippo:
+      import re as _re_np
+      import streamlit.components.v1 as _ncomp
+
+      # lots[].lot = "YY.MM.DD" 形式の日付でグループ化
+      _nippo_map: dict = {}  # key: "YYYY-MM-DD", value: list of row dicts
+      for _nrec in all_kakou:
+          _nlots = _nrec.get("lots") or []
+          if not _nlots and _nrec.get("kakou_lot"):
+              _nlots = [{"lot": _nrec["kakou_lot"], "hako": _nrec.get("hako_su", 0)}]
+          _sas = [s for s in (_nrec.get("sakushas") or [_nrec.get("sakusha","")]) if s]
+          _sa_str = " / ".join(_sas) if _sas else "—"
+          _pushed = False
+          for _le in _nlots:
+              _lot = (_le.get("lot") or "").strip()
+              _hako = int(_le.get("hako") or 0)
+              if not _lot: continue
+              _m = _re_np.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', _lot)
+              if not _m: continue
+              _dk = f"20{_m.group(1)}-{_m.group(2).zfill(2)}-{_m.group(3).zfill(2)}"
+              _nippo_map.setdefault(_dk, []).append({
+                  "明細No": _nrec.get("meisai_no",""),
+                  "品名":   _nrec.get("hinmei",""),
+                  "作業者": _sa_str,
+                  "箱数":   _hako,
+                  "状態":   "✓ 完了",
+              })
+              _pushed = True
+          if not _pushed and _nrec.get("kakoubi"):
+              _kb = _nrec["kakoubi"].strip()
+              _m2 = _re_np.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', _kb)
+              _dk2 = f"20{_m2.group(1)}-{_m2.group(2).zfill(2)}-{_m2.group(3).zfill(2)}" if _m2 else _kb
+              _nippo_map.setdefault(_dk2, []).append({
+                  "明細No": _nrec.get("meisai_no",""),
+                  "品名":   _nrec.get("hinmei",""),
+                  "作業者": _sa_str,
+                  "箱数":   _nrec.get("hako_su",0),
+                  "状態":   "✓ 完了",
+              })
+
+      if not _nippo_map:
+          st.info("加工Lot（YY.MM.DD形式）が入力されたデータがありません。")
+      else:
+          _WDAY = ["日","月","火","水","木","金","土"]
+          _sorted_dk = sorted(_nippo_map.keys(), reverse=True)
+          _total_days  = len(_sorted_dk)
+          _total_items = sum(len(v) for v in _nippo_map.values())
+          _total_hako  = sum(r["箱数"] for v in _nippo_map.values() for r in v)
+
+          # サマリーカード
+          _mc1, _mc2, _mc3 = st.columns(3)
+          with _mc1: st.metric("集計日数", f"{_total_days} 日")
+          with _mc2: st.metric("加工件数", f"{_total_items} 件")
+          with _mc3: st.metric("総箱数",   f"{_total_hako:,} C/S")
+          st.divider()
+
+          # 日別HTML表
+          _np_rows_html = ""
+          for _dk in _sorted_dk:
+              _rows = _nippo_map[_dk]
+              _day_hako = sum(r["箱数"] for r in _rows)
+              try:
+                  import datetime as _dt
+                  _d = _dt.date.fromisoformat(_dk)
+                  _label = f"{_dk} ({_WDAY[_d.weekday() + 1 if _d.weekday() < 6 else 0]})"
+                  # Python weekday(): Mon=0..Sun=6  → 日本曜日配列に変換
+                  _wjp = _WDAY[(_d.weekday() + 1) % 7]
+                  _label = f"{_dk} ({_wjp})"
+              except Exception:
+                  _label = _dk
+              _np_rows_html += (
+                  f'<tr class="dh"><td colspan="5">'
+                  f'📅 {_label}　合計 {_day_hako:,} C/S'
+                  f'</td></tr>'
+              )
+              for _r in _rows:
+                  _hako_str = f'{_r["箱数"]:,} C/S' if _r["箱数"] else "—"
+                  _np_rows_html += (
+                      f'<tr>'
+                      f'<td class="td-no">{_r["明細No"]}</td>'
+                      f'<td class="td-nm">{_r["品名"]}</td>'
+                      f'<td class="td-sa">{_r["作業者"]}</td>'
+                      f'<td class="td-hk">{_hako_str}</td>'
+                      f'<td class="td-st">{_r["状態"]}</td>'
+                      f'</tr>'
+                  )
+
+          _np_html = f"""<style>
+            body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
+            table{{border-collapse:collapse;width:100%;}}
+            th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 10px;border-bottom:2px solid #444;
+                text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
+            td{{padding:5px 10px;border-bottom:1px solid #2a2a2a;white-space:nowrap;}}
+            tr.dh td{{background:#161a20;color:#7ba7d9;font-weight:700;font-size:13px;
+                      border-left:3px solid #7ba7d9;padding:7px 12px;border-bottom:none;}}
+            .td-no{{color:#d97757;font-weight:600;}}
+            .td-nm{{max-width:300px;overflow:hidden;text-overflow:ellipsis;}}
+            .td-sa{{color:#9fc3e0;}}
+            .td-hk{{color:#f5c97b;font-weight:700;text-align:right;}}
+            .td-st{{color:#2e9e5b;font-weight:600;}}
+          </style>
+          <div style="overflow:auto;max-height:560px;">
+          <table>
+            <thead><tr>
+              <th>明細No</th><th>品名</th><th>作業者</th>
+              <th style="text-align:right">箱数</th><th>状態</th>
+            </tr></thead>
+            <tbody>{_np_rows_html}</tbody>
+          </table></div>"""
+          _ncomp.html(_np_html, height=620, scrolling=False)
 
     st.stop()
 
@@ -3958,147 +4073,3 @@ else:
 <div id="hl-rows" data-checked="{_checked_idx}" style="display:none"></div>
 """, unsafe_allow_html=True)
 
-    _nav_comp.html(f"""<script>
-(function(){{
-  const doc = window.parent.document;
-  // ── チェック行ハイライト ──
-  const checkedSet = new Set(
-    (doc.getElementById('hl-rows')?.dataset.checked || '')
-    .split(',').filter(Boolean).map(Number)
-  );
-  function applyRowHL(){{
-    const grid = doc.querySelector('.stDataFrameGlideDataEditor');
-    if(!grid) return;
-    grid.querySelectorAll('[role="row"]').forEach((row, pos)=>{{
-      if(pos === 0) return; // ヘッダー行はスキップ
-      const ari = row.getAttribute('aria-rowindex');
-      const idx = ari != null ? Number(ari) - 2 : pos - 1;
-      row.classList.toggle('row-checked', checkedSet.has(idx));
-    }});
-  }}
-  const rowObs = new MutationObserver(applyRowHL);
-  rowObs.observe(doc.body, {{childList:true, subtree:true}});
-  [100, 400, 900].forEach(t => setTimeout(applyRowHL, t));
-
-  // ── 複数行選択 → URL params 書き込み（一括チェック用） ──
-  // aria-selected が使えないためマウスドラッグ start/end を自前追跡
-  (function(){{
-    const win = window.parent;
-    let _selStart = -1, _selEnd = -1, _dragging = false;
-
-    // クライアントY → 0ベース行インデックス
-    function rowFromClientY(clientY){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(!sc) return -1;
-      const rows = sc.querySelectorAll('[role="row"]');
-      const scRect = sc.getBoundingClientRect();
-      const relY = clientY - scRect.top;
-      const scrolledY = relY + sc.scrollTop;
-      let headerH = 35, rowH = 35;
-      if(rows.length >= 1) headerH = rows[0].getBoundingClientRect().height || 35;
-      if(rows.length >= 2) rowH   = rows[1].getBoundingClientRect().height || 35;
-      if(scrolledY < headerH) return -1;
-      return Math.floor((scrolledY - headerH) / rowH);
-    }}
-
-    // フラグ列（第1列）の幅: gridcell で取れなければ固定値
-    function getFirstColWidth(){{
-      const cell = doc.querySelector('.dvn-scroller [role="gridcell"][aria-colindex="1"]');
-      return cell ? cell.offsetWidth : 55;
-    }}
-
-    function onPointerDown(e){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(!sc) return;
-      const rect = sc.getBoundingClientRect();
-      const relX = e.clientX - rect.left;
-      const row  = rowFromClientY(e.clientY);
-
-      if(relX >= getFirstColWidth()){{
-        // フラグ列以外 → 選択ドラッグ開始として記録
-        _dragging = true;
-        _selStart = row;
-        _selEnd   = row;
-        const url = new URL(win.location.href);
-        url.searchParams.delete('_sgt_sel');
-        win.history.replaceState(null, '', url.toString());
-      }} else {{
-        // フラグ列クリック → 記録済み選択範囲で一括適用
-        _dragging = false;
-        const url = new URL(win.location.href);
-        if(_selStart >= 0 && _selEnd >= 0 && _selStart !== _selEnd){{
-          const minR = Math.min(_selStart, _selEnd);
-          const maxR = Math.max(_selStart, _selEnd);
-          const sel  = Array.from({{length: maxR - minR + 1}}, (_, i) => minR + i);
-          url.searchParams.set('_sgt_sel', sel.join(','));
-        }} else {{
-          url.searchParams.delete('_sgt_sel');
-        }}
-        win.history.replaceState(null, '', url.toString());
-      }}
-    }}
-
-    function onPointerMove(e){{
-      if(!_dragging || e.buttons !== 1) return;
-      const r = rowFromClientY(e.clientY);
-      if(r >= 0) _selEnd = r;
-    }}
-
-    function attachListeners(){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(sc && !sc._sgtSelOn){{
-        sc._sgtSelOn = true;
-        sc.addEventListener('pointerdown', onPointerDown, {{capture:true}});
-        sc.addEventListener('pointermove', onPointerMove, {{passive:true}});
-        sc.addEventListener('pointerup',   ()=>{{ _dragging=false; }}, {{passive:true}});
-      }}
-    }}
-    const selObs = new MutationObserver(attachListeners);
-    selObs.observe(doc.body, {{childList:true, subtree:true}});
-    [200, 600, 1200].forEach(t=>setTimeout(attachListeners, t));
-  }})();
-
-  // ── 列ホバー（既存） ──
-  (function injectColHL(){{
-    const ORANGE_COL = "rgba(255,140,40,0.13)";
-    function applyTo(root){{
-      root.querySelectorAll('[role="columnheader"]').forEach((th,ci)=>{{
-        th.addEventListener("mouseenter",()=>{{
-          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
-            td.style.background=ORANGE_COL;}});
-          th.style.background=ORANGE_COL;
-        }});
-        th.addEventListener("mouseleave",()=>{{
-          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
-            td.style.background="";}});
-          th.style.background="";
-        }});
-      }});
-    }}
-    const obs=new MutationObserver(()=>{{
-      doc.querySelectorAll('iframe').forEach(f=>{{
-        try{{ if(f.contentDocument) applyTo(f.contentDocument); }}catch(e){{}}
-      }});
-    }});
-    obs.observe(doc.body,{{childList:true,subtree:true}});
-  }})();
-}})();
-</script>""", height=0, scrolling=False)
-
-    st.data_editor(
-        df,
-        use_container_width=True,
-        height=650,
-        column_config={
-            "フラグ"      : st.column_config.CheckboxColumn("フラグ", help="チェックで起票フラグON"),
-            "加工時間(h)" : st.column_config.NumberColumn(format="%.1f h"),
-            "単価"        : st.column_config.NumberColumn(format="¥%d"),
-            "数量"        : st.column_config.NumberColumn(format="%d"),
-        },
-        disabled=disabled_cols,
-        hide_index=True,
-        key="order_editor",
-        on_change=_apply_flag_edits,
-    )
-
-st.markdown('<div style="height:50px"></div>', unsafe_allow_html=True)
