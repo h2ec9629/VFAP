@@ -43,7 +43,6 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   th{background:#1e1e1e;color:#bbb;font-size:11px;font-weight:600;
      padding:4px 6px;border:1px solid #333;text-align:center;white-space:nowrap;}
   td{padding:3px 6px;border:1px solid #444;vertical-align:middle;font-size:12px;}
-  tbody tr{box-shadow:inset 0 -1px 0 #444;}
   tr:hover td{background:#222;}
   td.date-c{background:#1c1c1c!important;color:#999;text-align:center;
             white-space:pre;vertical-align:top;padding-top:5px;font-size:11px;
@@ -351,11 +350,8 @@ function render(){
       }
       const pick=picks[i];
       if(pick){
-        if(pick.showMatName){
-          const mntd=mkTd(pick.matName,'mat nm');
-          if(pick.matNameRowspan>1)mntd.rowSpan=pick.matNameRowspan;
-          tr.appendChild(mntd);
-        }
+        // rowspanをやめて全行に描画（省略処理を廃止して罫線を統一）
+        tr.appendChild(mkTd(pick.matName,'mat nm'));
         const isShowcase=pick.matName&&(pick.matName.includes('ショーケース')||pick.matName.includes('ｼｮｰｹｰｽ'));
         const isToguCover=pick.matName&&pick.matName.includes('灯具カバー');
         let qtyDisp='';
@@ -372,14 +368,8 @@ function render(){
           }
         }
         tr.appendChild(mkTd(qtyDisp,'qty r'));
-        if(pick.showHako){
-          const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
-          if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
-          tr.appendChild(hakTd);
-          const shosuTd=mkTd(String(pick.shosu),'r');
-          if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
-          tr.appendChild(shosuTd);
-        }
+        tr.appendChild(mkTd(pick.hakoNm,pick.muted?'hako-muted':''));
+        tr.appendChild(mkTd(String(pick.shosu),'r'));
       }else if(i===0&&picks.length===0){
         const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
       }else{
@@ -396,4 +386,4 @@ function render(){
 }
 document.addEventListener('DOMContentLoaded', setThisWeek);
 </script>
-</bod
+</bod                                                                                                                                                                                                                                                                                                                                 
