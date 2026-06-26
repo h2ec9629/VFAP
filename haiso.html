@@ -350,8 +350,11 @@ function render(){
       }
       const pick=picks[i];
       if(pick){
-        // rowspanをやめて全行に描画（省略処理を廃止して罫線を統一）
-        tr.appendChild(mkTd(pick.matName,'mat nm'));
+        if(pick.showMatName){
+          const mntd=mkTd(pick.matName,'mat nm');
+          if(pick.matNameRowspan>1)mntd.rowSpan=pick.matNameRowspan;
+          tr.appendChild(mntd);
+        }
         const isShowcase=pick.matName&&(pick.matName.includes('ショーケース')||pick.matName.includes('ｼｮｰｹｰｽ'));
         const isToguCover=pick.matName&&pick.matName.includes('灯具カバー');
         let qtyDisp='';
@@ -368,8 +371,14 @@ function render(){
           }
         }
         tr.appendChild(mkTd(qtyDisp,'qty r'));
-        tr.appendChild(mkTd(pick.hakoNm,pick.muted?'hako-muted':''));
-        tr.appendChild(mkTd(String(pick.shosu),'r'));
+        if(pick.showHako){
+          const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
+          if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
+          tr.appendChild(hakTd);
+          const shosuTd=mkTd(String(pick.shosu),'r');
+          if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
+          tr.appendChild(shosuTd);
+        }
       }else if(i===0&&picks.length===0){
         const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
       }else{
@@ -386,4 +395,4 @@ function render(){
 }
 document.addEventListener('DOMContentLoaded', setThisWeek);
 </script>
-</bod                                                                                                                                                                                                                                                                                                                                 
+</bod                                            
