@@ -14,10 +14,7 @@ import pandas as pd
 import openpyxl
 from pathlib import Path
 import json
-<<<<<<< HEAD
 import sqlite3
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 import math
 import os
 import shutil
@@ -98,7 +95,6 @@ def _get_or_open_wb(excel, path: Path):
 # 完了処理：帳票書き込み + PDF出力 + PDFtk結合
 # ══════════════════════════════════════════════════════════
 
-<<<<<<< HEAD
 # ── records/*.json 用 SQLite インデックス（全glob全読み対策）─────────────
 #   mtime+size が一致するファイルは本体を読まず DB キャッシュから返す。
 #   → OneDrive のオンデマンド同期（ファイル本体ダウンロード）を回避できる。
@@ -217,15 +213,6 @@ def _load_kakou_dict() -> dict:
     """meisai_no をキーに完了済み加工記録を読む（カード優先＋ノート補完）"""
     try:
         records = _load_all_cases(BASE_DIR)
-=======
-def _load_kakou_dict() -> dict:
-    """meisai_no をキーに kakou_kiroku.json（完了済み）を読む"""
-    p = BASE_DIR / "kakou_kiroku.json"
-    if not p.exists():
-        return {}
-    try:
-        records = json.loads(p.read_text(encoding="utf-8"))
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         return {str(r.get("meisai_no", "")).lstrip("0"): r for r in records if r.get("kanryo")}
     except Exception:
         return {}
@@ -451,13 +438,8 @@ def _make_meisaisho_pdf(ad_str: str, items: list, out_path) -> tuple:
         # ──────────────────────────────────────
         _TABLE_TOP = _ty - _BH - 8
 
-<<<<<<< HEAD
         # 列幅：品名を広くするためLot列を圧縮（Lot日16→11, Lot箱10→7, 削減40u分を品名へ）
         _COL_UNITS = [5.25, 11.75, 69.625, 12.75, 11.625] + [11, 7] * 5
-=======
-        # 列幅：Excel比率（B:C:E:F:G = 5.25:11.75:29.625:12.75:11.625）+ Lot列
-        _COL_UNITS = [5.25, 11.75, 29.625, 12.75, 11.625] + [16, 10] * 5
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         _scale = _TW / sum(_COL_UNITS)
         _CW = [u * _scale for u in _COL_UNITS]
 
@@ -554,11 +536,7 @@ def _make_meisaisho_pdf(ad_str: str, items: list, out_path) -> tuple:
                 _c.setFont(_JA, 8)
                 _c.drawCentredString(_cx(1) + _CW[1] / 2, _mid_y, _mn)
                 _hn = str(_it.get("hinmei", ""))
-<<<<<<< HEAD
                 _fs_h = 9 if len(_hn) <= 30 else (8 if len(_hn) <= 42 else 7)
-=======
-                _fs_h = 9 if len(_hn) <= 15 else (8 if len(_hn) <= 20 else 7)
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
                 _c.setFont(_JA, _fs_h)
                 _c.drawString(_cx(2) + 2, _mid_y, _hn)
                 _qty = _it.get("qty", 0) or 0
@@ -1200,7 +1178,6 @@ def detect_base_dir() -> Path:
 
     _od_work = detect_onedrive_work()
     if _od_work:
-<<<<<<< HEAD
         # データフォルダを固定（自動探索のドリフト防止）。
         # 新名 VFAP-cloud を優先、旧名 SGT_cloud もフォールバックで受ける（改名移行用）。
         for _cloud_name in ("VFAP-cloud", "SGT_cloud"):
@@ -1211,9 +1188,6 @@ def detect_base_dir() -> Path:
             except Exception:
                 pass
             candidates.append(_cloud)
-=======
-        candidates.append(_od_work / "SGT_cloud")
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         candidates.append(_od_work / "VFAP")
         candidates.append(_od_work / "sgt2605_cloud_bundle")
         candidates.append(_od_work)
@@ -1255,10 +1229,7 @@ def detect_jushi_dir(base: Path) -> Path:
 
     _od_work2 = detect_onedrive_work()
     if _od_work2:
-<<<<<<< HEAD
         candidates.append(_od_work2 / "VFAP-cloud" / "input" / "樹脂指示書")
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         candidates.append(_od_work2 / "SGT_cloud" / "input" / "樹脂指示書")
         candidates.append(_od_work2 / "input" / "樹脂指示書")
 
@@ -1286,7 +1257,6 @@ JUSHI_CACHE_PATH = BASE_DIR / "jushi_scan_cache.json"   # mtimeキャッシュ
 # クリーン版（外部リンク除去済み）保管先 ─ app.py と同階層の VFAP フォルダ固定
 CLEAN_DIR   = Path(__file__).resolve().parent / "樹脂指示書_クリーン"
 
-<<<<<<< HEAD
 # ── 帳票保管庫（生成済みPDFを年/月で振り分けて保管）──
 CHOHYO_ROOT = BASE_DIR / "帳票保管"
 CHOHYO_DIRS = {
@@ -1515,8 +1485,6 @@ def _html_to_pdf_edge(html_text: str, out_pdf: Path, landscape: bool = False) ->
         except Exception:
             pass
 
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 # ══════════════════════════════════════════════════════════
 # nittei.json 保存サーバー（バックグラウンドスレッド port:8502）
 # ══════════════════════════════════════════════════════════
@@ -1561,7 +1529,6 @@ def _sync_kakozu_status(base_dir, nittei_rows: list):
 _SAVE_PORT = 8502
 _save_lock = threading.Lock()
 
-<<<<<<< HEAD
 # ── Gist自動push（保存トリガー） ────────────────────────────────────────────
 _gist_push_running = threading.Lock()
 
@@ -1584,8 +1551,99 @@ def _gist_push_async():
             _gist_push_running.release()
     threading.Thread(target=_run, daemon=True).start()
 
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
+
+def _update_gantt_render(base_dir: Path, rows: list) -> None:
+    """
+    加工記録でdoneが更新されたとき、gantt_render.jsonをPython側で再計算して上書きする。
+    computeGanttRender()（nittei.js）と同じロジック。
+    gantt_render.jsonが存在しない場合（保存ボタンが未押下）はスキップ。
+    """
+    import datetime as _dt
+    gantt_path = base_dir / "gantt_render.json"
+    if not gantt_path.exists():
+        return
+    try:
+        gr = json.loads(gantt_path.read_text(encoding="utf-8"))
+        bar_offset   = float(gr.get("bar_offset", 0))
+        days         = gr.get("days", [])   # [["MM/DD", "曜日"], ...]
+    except Exception:
+        return
+
+    today = _dt.date.today()
+
+    def _is_auto_hide(r: dict) -> bool:
+        qty  = r.get("qty") or 0
+        done = r.get("done") or 0
+        if not qty or done < qty:
+            return False
+        ad = r.get("ad")
+        if not ad:
+            return False
+        try:
+            m, d_v = (int(x) for x in str(ad).split("/"))
+            ad_date = _dt.date(today.year, m, d_v)
+            return ad_date < today
+        except Exception:
+            return False
+
+    cum_h = 0.0
+    gantt_rows: list[dict] = []
+    ac_side:    list[dict] = []
+    ad_side:    list[dict] = []
+
+    for r in rows:
+        nm            = r.get("nm") or ""
+        qty           = int(r.get("qty") or 0)
+        done          = int(r.get("done") or 0)
+        hours         = float(r.get("hours") or 0)
+        ac            = r.get("ac") or None
+        ad            = r.get("ad") or None
+        af            = r.get("af") or None
+        parallel_from = r.get("parallelFrom") or None
+
+        pct100    = qty > 0 and done >= qty
+        remaining = 0.0 if pct100 else (hours * (qty - done) / qty if qty > 0 else hours)
+
+        if parallel_from:
+            pi      = next((i for i, d in enumerate(days) if d[0] == parallel_from), -1)
+            start_h = float(pi * 8) if pi >= 0 else cum_h
+            end_h   = start_h + remaining
+            cum_h   = end_h
+        else:
+            start_h = cum_h
+            cum_h  += remaining
+            end_h   = cum_h
+
+        # autoHide行はganttに含めない（haiso側も除外、buildBodyと同じ挙動）
+        if _is_auto_hide(r):
+            continue
+
+        pct_val = round(done / qty * 100) if qty else 0
+        gantt_rows.append({
+            "nm":          nm,
+            "startH":      round((start_h + bar_offset) * 100) / 100,
+            "remaining":   round(remaining * 100) / 100,
+            "pct":         pct_val,
+            "ac":          ac,
+            "ad":          ad,
+            "af":          af,
+            "parallelFrom": parallel_from,
+            "color":       "proc1" if "灯具" in nm else "proc2",
+        })
+        if ac:
+            ac_side.append({"date": ac, "ag": nm})
+        if ad:
+            ad_side.append({"date": ad, "d": nm, "u": f"{done}/{qty}"})
+
+    gr["gantt"]    = gantt_rows
+    gr["haiso"]    = {"ac_side": ac_side, "ad_side": ad_side}
+    gr["saved_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    try:
+        gantt_path.write_text(json.dumps(gr, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 class _SaveHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1608,16 +1666,26 @@ class _SaveHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length))
+            # 新フォーマット: {"rows": [...], "gantt_render": {...}}
+            # 旧フォーマット: [...] （後方互換）
+            if isinstance(data, list):
+                rows = data
+                gantt_render = None
+            else:
+                rows = data.get("rows", [])
+                gantt_render = data.get("gantt_render")
             nittei_path = self.__class__.base_dir / "nittei.json"
             with _save_lock:
                 nittei_path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
                 # 加工完了依頼の sgt_status.json 同期（qty==done の依頼を加工済に更新）
-                _sync_kakozu_status(self.__class__.base_dir, data)
-<<<<<<< HEAD
+                _sync_kakozu_status(self.__class__.base_dir, rows)
+                # gantt_render.json 保存（モバイル閲覧用・VFAPの計算済み描画データ）
+                if gantt_render:
+                    gantt_path = self.__class__.base_dir / "gantt_render.json"
+                    gantt_path.write_text(
+                        json.dumps(gantt_render, ensure_ascii=False, indent=2), encoding="utf-8")
             _gist_push_async()  # 保存後にGistへ自動push
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"ok":true}')
@@ -1642,7 +1710,6 @@ _start_save_server(BASE_DIR)
 _KAKOU_PORT = 8503
 _kakou_lock = threading.Lock()
 
-<<<<<<< HEAD
 def _save_case_json(base_dir: Path, record: dict):
     """① 段階移行：1案件1JSONを records/年/月/明細No.json にアトミック保存する。
     納品日(yy/mm/dd)で年・月フォルダへ振り分け。納品月が変わったら旧ファイルを削除（引っ越し）。
@@ -1675,8 +1742,6 @@ def _save_case_json(base_dir: Path, record: dict):
     os.replace(str(tmp), str(target))
 
 
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 class _KakouHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1687,7 +1752,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
-<<<<<<< HEAD
         if self.path.split("?")[0] == "/chohyo_ping":
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -1714,8 +1778,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
             except Exception:
                 self.send_response(500); self._cors(); self.end_headers()
             return
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         if self.path.split("?")[0] == "/ui":
             # app.py と同じフォルダの kiroku.html を使う（BASE_DIR とは独立）
             ui_path = Path(__file__).resolve().parent / "kiroku.html"
@@ -1724,10 +1786,7 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.send_response(200); self._cors()
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
-<<<<<<< HEAD
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
                 self.end_headers()
                 self.wfile.write(data)
                 self.wfile.flush()
@@ -1737,25 +1796,16 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(str(_e).encode())
             return
-<<<<<<< HEAD
         with _kakou_lock:
             try:
                 data = json.dumps(_load_all_cases(self.__class__.base_dir),
                                   ensure_ascii=False).encode("utf-8")
             except Exception:
-=======
-        kakou_path = self.__class__.base_dir / "kakou_kiroku.json"
-        with _kakou_lock:
-            if kakou_path.exists():
-                data = kakou_path.read_bytes()
-            else:
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
                 data = b"[]"
         self.send_response(200); self._cors()
         self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(data)
     def do_POST(self):
-<<<<<<< HEAD
         # ── 帳票保管庫：表示中HTMLを受け取りEdgeでPDF化して保管 ──
         if self.path.split("?")[0] == "/save_chohyo":
             try:
@@ -1787,8 +1837,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(
                     {"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8"))
             return
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         try:
             length = int(self.headers.get("Content-Length", 0))
             record = json.loads(self.rfile.read(length))
@@ -1813,7 +1861,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                     all_records.append(record)
                 kakou_path.write_text(
                     json.dumps(all_records, ensure_ascii=False, indent=2), encoding="utf-8")
-<<<<<<< HEAD
                 _jsonl_log("kakou_save", {"meisai_no": record.get("meisai_no")})
                 # 加工記録の保存時のみ、日程の進捗(done)に入庫数(nyuko_su)を反映する
                 try:
@@ -1844,6 +1891,7 @@ class _KakouHandler(BaseHTTPRequestHandler):
                                 _np.write_text(
                                     json.dumps(_nrows, ensure_ascii=False, indent=2),
                                     encoding="utf-8")
+                                _update_gantt_render(self.__class__.base_dir, _nrows)
                 except Exception:
                     pass
                 # ① 段階移行：1案件1JSONも書き出す（失敗してもノート保存には影響させない）
@@ -1852,8 +1900,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             _gist_push_async()  # 保存・完了どちらでもGistへ自動push
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"ok":true}')
@@ -1872,7 +1918,6 @@ def _start_kakou_server(base_dir: Path):
 
 _start_kakou_server(BASE_DIR)
 
-<<<<<<< HEAD
 # 残4: 起動時に1日1回バックアップ＋起動ログ（セッション単位で1度だけ）
 try:
     if not st.session_state.get("_r4_boot_done"):
@@ -1882,8 +1927,6 @@ try:
 except Exception:
     pass
 
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
 # ══════════════════════════════════════════════════════════
 # CSS：Claude ダークテーマ
@@ -2180,10 +2223,7 @@ def build_vfdb_spec_by_name() -> dict:
             "hoho1":  _v(r.get("梱包方法")),
             "hoho2":  _v(r.get("備考１")),
             "hoho3":  _v(r.get("備考２")),
-<<<<<<< HEAD
             "kosuu":  _v(r.get("切断工数")),  # 切断工数(本/h) — 日程表の進捗工数表示用
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         }
     return out
 
@@ -2398,10 +2438,7 @@ def sync_sgt_to_nittei() -> tuple:
     except Exception as e:
         return 0, f"nittei.json 書き込みエラー: {e}"
 
-<<<<<<< HEAD
     _gist_push_async()  # SGT同期後にGistへ自動push
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
     return updated, f"{updated} 件を SGT から同期しました"
 
 
@@ -2414,7 +2451,11 @@ def load_nittei_rows() -> list:
         return []
     try:
         with open(nittei_path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # 旧サーバーが誤って {rows:[...], gantt_render:{...}} 形式で保存した場合に対応
+        if isinstance(data, dict):
+            return data.get("rows", [])
+        return data
     except Exception as e:
         st.error(f"nittei.json 読み込みエラー: {e}")
         return []
@@ -2623,11 +2664,7 @@ def scan_jushi(vfdb: dict, existing_page_keys: set) -> list:
 # ══════════════════════════════════════════════════════════
 # ページ状態管理（クエリパラメータ方式）
 # ══════════════════════════════════════════════════════════
-<<<<<<< HEAD
 PAGES = ["日程表", "配送", "依頼書保管", "データベース", "加工記録", "在庫管理", "請求", "帳票保管庫"]
-=======
-PAGES = ["日程表", "依頼書保管", "データベース", "加工記録", "在庫管理", "配送", "請求"]
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
 # ── ページ状態管理 ──
 if "page_sel" not in st.session_state:
@@ -2733,23 +2770,7 @@ _nav_comp.html(f"""<script>
 
 page_sel = st.session_state.page_sel
 
-<<<<<<< HEAD
 # SGT.xlsm 未接続チェックは無効化（現場端末はSGTなしで運用）
-=======
-# ══════════════════════════════════════════════════════════
-# SGT.xlsm 未接続の場合の早期ガイド
-# ══════════════════════════════════════════════════════════
-if not SGT_PATH.exists():
-    st.markdown("## SGT管理システム")
-    st.error(
-        f"SGT.xlsm が見つかりませんでした。\n\n"
-        f"探した場所: `{SGT_PATH}`\n\n"
-        f"**対処法**\n"
-        f"1. このアプリ（app.py）を SGT.xlsm と同じフォルダに置く、または\n"
-        f"2. 起動バッチで環境変数 `SGT_BASE_DIR` に SGT.xlsm のあるフォルダを指定してください。"
-    )
-    st.stop()
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 
 # ══════════════════════════════════════════════════════════
 # 日程表ページ
@@ -2793,17 +2814,9 @@ if page_sel.startswith("日程表"):
             if _o:
                 if _o.get("品名"):
                     _nr["nm"] = _o["品名"]
-<<<<<<< HEAD
                 # 総工数 = 注文数 ÷ 切断工数（残数量で割らない）
                 _qty  = float(_o.get("数量") or 0)
                 _h = calc_hours(_qty, _o.get("切断工数"))
-=======
-                # 残工数 = (注文数 - 進捗数) ÷ 切断工数
-                _qty  = float(_o.get("数量") or 0)
-                _done = float(_nr.get("done", 0) or 0)
-                _remaining = max(0.0, _qty - _done)
-                _h = calc_hours(_remaining, _o.get("切断工数"))
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
                 if _h is not None:
                     _nr["hours"] = _h
                 # 期限(af)が未設定なら依頼書ページの期限列（納品日）で補完
@@ -2812,17 +2825,8 @@ if page_sel.startswith("日程表"):
                     if _af:
                         _nr["af"] = _af
             else:
-<<<<<<< HEAD
                 # 依頼書データなし → hours は総工数のまま保持（書き換えない）
                 pass
-=======
-                # 依頼書データなし → nittei.json の qty/done/hours から残工数を推算
-                _qty   = float(_nr.get("qty",   0) or 0)
-                _done  = float(_nr.get("done",  0) or 0)
-                _htot  = float(_nr.get("hours", 0) or 0)
-                if _qty > 0 and _htot > 0:
-                    _nr["hours"] = round(_htot * max(0.0, _qty - _done) / _qty, 1)
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
     today        = datetime.today()
     working_days = gen_working_days(today, n_days=60)
     today_str    = today.strftime("%m/%d")
@@ -2832,6 +2836,11 @@ if page_sel.startswith("日程表"):
     days_js = _json.dumps(working_days, ensure_ascii=False)
 
     html_src = (Path(__file__).resolve().parent / "日程ページ_試作.html").read_text(encoding="utf-8")
+    # nittei.js を読み込んでプレースホルダーに埋め込む
+    _nittei_js_path = Path(__file__).resolve().parent / "nittei.js"
+    if _nittei_js_path.exists():
+        _nittei_js = _nittei_js_path.read_text(encoding="utf-8")
+        html_src = html_src.replace("<!-- NITTEI_JS -->", f"<script>\n{_nittei_js}\n</script>")
     html_src = _re.sub(r"const days=\[.*?\];",  f"const days={days_js};",  html_src, flags=_re.DOTALL)
     html_src = _re.sub(r"TODAY_DAY=\d+",          f"TODAY_DAY={today_idx}",  html_src)
     html_src = _re.sub(r"let rows=\[.*?\];",     f"let rows={rows_js};",    html_src, flags=_re.DOTALL)
@@ -2903,7 +2912,6 @@ if page_sel == "加工記録":
     if st.button("再読み込み", key="kakou_reload"):
         st.rerun()
 
-<<<<<<< HEAD
     try:
         all_kakou = _load_all_cases(BASE_DIR)
     except Exception as e:
@@ -2912,17 +2920,6 @@ if page_sel == "加工記録":
     if not all_kakou:
         st.info("まだ加工記録がありません。日程ページの明細Noをタップして記録を追加してください。")
         st.stop()
-=======
-    kakou_path = BASE_DIR / "kakou_kiroku.json"
-    if not kakou_path.exists():
-        st.info("まだ加工記録がありません。日程ページの明細Noをタップして記録を追加してください。")
-        st.stop()
-    try:
-        all_kakou = json.loads(kakou_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        st.error(f"加工記録の読み込みエラー: {e}")
-        st.stop()
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
     # 「完了」ボタンが押された記録のみ履歴に表示する（下書き状態は対象外）
     all_kakou = [r for r in all_kakou if r.get("kanryo") is True]
     if not all_kakou:
@@ -2941,12 +2938,15 @@ if page_sel == "加工記録":
 
     st.divider()
 
-    # 一覧テーブル（明細Noクリックで記入ページを開く）
-    import urllib.parse as _up
-    import streamlit.components.v1 as _kcomp
+    _tab_list, _tab_nippo = st.tabs(["📋 一覧", "📅 日報"])
 
-    _rows_html = ""
-    for rec in all_kakou:
+    with _tab_list:
+      # 一覧テーブル（明細Noクリックで記入ページを開く）
+      import urllib.parse as _up
+      import streamlit.components.v1 as _kcomp
+
+      _rows_html = ""
+      for rec in all_kakou:
         daily   = rec.get("daily", [])
         kakou_s = sum(d.get("kakou_su", 0) for d in daily)
         furyou  = rec.get("furyou", {})
@@ -2969,58 +2969,209 @@ if page_sel == "加工記録":
             f'</tr>'
         )
 
-    _table_html = f"""<style>
-      body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
-      table{{border-collapse:collapse;width:100%;}}
-      th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 8px;border-bottom:2px solid #444;
-          text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
-      .kr{{border-bottom:1px solid #2a2a2a;cursor:pointer;}}
-      .kr:hover td{{background:rgba(255,140,40,0.12)!important;}}
-      td{{padding:5px 8px;border-right:1px solid #2a2a2a;white-space:nowrap;}}
-      .td-no{{color:#d97757;font-weight:600;text-decoration:underline;}}
-    </style>
-    <div style="overflow:auto;max-height:540px;">
-    <table>
-      <thead><tr>
-        <th>明細No ↗</th><th>品名</th><th>伝票</th><th>作業者</th>
-        <th>加工Lot</th><th>箱数</th><th>加工数計</th><th>不良計</th><th>更新日時</th>
-      </tr></thead>
-      <tbody>{_rows_html}</tbody>
-    </table></div>"""
-    _kcomp.html(_table_html, height=600, scrolling=False)
+      _table_html = f"""<style>
+        body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
+        table{{border-collapse:collapse;width:100%;}}
+        th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 8px;border-bottom:2px solid #444;
+            text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
+        .kr{{border-bottom:1px solid #2a2a2a;cursor:pointer;}}
+        .kr:hover td{{background:rgba(255,140,40,0.12)!important;}}
+        td{{padding:5px 8px;border-right:1px solid #2a2a2a;white-space:nowrap;}}
+        .td-no{{color:#d97757;font-weight:600;text-decoration:underline;}}
+      </style>
+      <div style="overflow:auto;max-height:540px;">
+      <table>
+        <thead><tr>
+          <th>明細No ↗</th><th>品名</th><th>伝票</th><th>作業者</th>
+          <th>加工Lot</th><th>箱数</th><th>加工数計</th><th>不良計</th><th>更新日時</th>
+        </tr></thead>
+        <tbody>{_rows_html}</tbody>
+      </table></div>"""
+      _kcomp.html(_table_html, height=600, scrolling=False)
 
-    # 詳細展開（expander）
-    st.divider()
-    st.markdown("#### 詳細")
-    for rec in all_kakou:
-        no   = rec.get("meisai_no", "")
-        nm   = rec.get("hinmei", "")
-        with st.expander(f"明細No {no}  {nm}", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown(f"**作業者**　{rec.get('sakusha','')}  ")
-                st.markdown(f"**加工Lot**　{rec.get('kakou_lot','')}  ")
-            with c2:
-                st.markdown(f"**箱数**　{rec.get('hako_su','')}")
-                st.markdown(f"**入重日**　{rec.get('irejubi','')}  入重数　{rec.get('ireju_su','')}")
-            with c3:
-                st.markdown(f"**備考**　{rec.get('biko','')}")
-            # 作業明細
-            daily = rec.get("daily", [])
-            if daily:
-                df_d = pd.DataFrame(daily).rename(columns={
-                    "sakugyobi":"作業日","ondo":"温度(℃)",
-                    "kakou_su":"加工数","hazai":"端材使用"
-                })
-                st.dataframe(df_d, use_container_width=True, hide_index=True)
-            # 不良内訳
-            fu = rec.get("furyou", {})
-            fu_map = {"kizu":"キズ","kubomi":"凹み","imono":"異物","kake":"欠け",
-                      "meyani":"メヤニ","peko":"ペコツキ","osen":"汚損",
-                      "keijo":"形状異常","sonota":"その他"}
-            fu_rows = [{lbl: fu.get(k, 0) for k, lbl in fu_map.items()}]
-            fu_rows[0]["合計"] = sum(fu.get(k,0) for k in fu_map)
-            st.dataframe(pd.DataFrame(fu_rows), use_container_width=True, hide_index=True)
+      # 詳細展開（expander）
+      st.divider()
+      st.markdown("#### 詳細")
+      for rec in all_kakou:
+          no   = rec.get("meisai_no", "")
+          nm   = rec.get("hinmei", "")
+          with st.expander(f"明細No {no}  {nm}", expanded=False):
+              c1, c2, c3 = st.columns(3)
+              with c1:
+                  st.markdown(f"**作業者**　{rec.get('sakusha','')}  ")
+                  st.markdown(f"**加工Lot**　{rec.get('kakou_lot','')}  ")
+              with c2:
+                  st.markdown(f"**箱数**　{rec.get('hako_su','')}")
+                  st.markdown(f"**入重日**　{rec.get('irejubi','')}  入重数　{rec.get('ireju_su','')}")
+              with c3:
+                  st.markdown(f"**備考**　{rec.get('biko','')}")
+              # 作業明細
+              daily = rec.get("daily", [])
+              if daily:
+                  df_d = pd.DataFrame(daily).rename(columns={
+                      "sakugyobi":"作業日","ondo":"温度(℃)",
+                      "kakou_su":"加工数","hazai":"端材使用"
+                  })
+                  st.dataframe(df_d, use_container_width=True, hide_index=True)
+              # 不良内訳
+              fu = rec.get("furyou", {})
+              fu_map = {"kizu":"キズ","kubomi":"凹み","imono":"異物","kake":"欠け",
+                        "meyani":"メヤニ","peko":"ペコツキ","osen":"汚損",
+                        "keijo":"形状異常","sonota":"その他"}
+              fu_rows = [{lbl: fu.get(k, 0) for k, lbl in fu_map.items()}]
+              fu_rows[0]["合計"] = sum(fu.get(k,0) for k in fu_map)
+              st.dataframe(pd.DataFrame(fu_rows), use_container_width=True, hide_index=True)
+
+    # ── 日報タブ ──────────────────────────────────────────
+    with _tab_nippo:
+      import re as _re_np
+      import unicodedata as _ud_np
+      import streamlit.components.v1 as _ncomp
+
+      # 品名 → 入数(梱包) のマップを vfdb から構築
+      def _np_norm(s):
+          return _re_np.sub(r"\s+", "", _ud_np.normalize("NFKC", str(s if s is not None else "")))
+      _np_irisu_map: dict = {}
+      _np_kosuu_map: dict = {}
+      try:
+          _np_vfdb = build_vfdb_spec_by_name()
+          _np_irisu_map = {k: v.get("irisu","") for k, v in _np_vfdb.items()}
+          _np_kosuu_map = {k: v.get("kosuu","") for k, v in _np_vfdb.items()}
+      except Exception:
+          pass
+
+      def _np_get_irisu(hinmei: str) -> int:
+          raw = _np_irisu_map.get(_np_norm(hinmei), "")
+          try: return int(float(str(raw).replace(",","").strip()))
+          except: return 0
+
+      def _np_get_kosuu(hinmei: str) -> float:
+          raw = _np_kosuu_map.get(_np_norm(hinmei), "")
+          try: return float(str(raw).replace(",","").strip())
+          except: return 0.0
+
+      # lots[].lot = "YY.MM.DD" 形式の日付でグループ化
+      _nippo_map: dict = {}  # key: "YYYY-MM-DD", value: list of row dicts
+      for _nrec in all_kakou:
+          _nlots = _nrec.get("lots") or []
+          if not _nlots and _nrec.get("kakou_lot"):
+              _nlots = [{"lot": _nrec["kakou_lot"], "hako": _nrec.get("hako_su", 0)}]
+          _sas = [s for s in (_nrec.get("sakushas") or [_nrec.get("sakusha","")]) if s]
+          _sa_str = " / ".join(_sas) if _sas else "—"
+          _nrec_hinmei = _nrec.get("hinmei","")
+          _nrec_irisu  = _np_get_irisu(_nrec_hinmei)
+          _nrec_kosuu  = _np_get_kosuu(_nrec_hinmei)
+          _pushed = False
+          for _le in _nlots:
+              _lot = (_le.get("lot") or "").strip()
+              _hako = int(_le.get("hako") or 0)
+              if not _lot: continue
+              _m = _re_np.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', _lot)
+              if not _m: continue
+              _dk = f"20{_m.group(1)}-{_m.group(2).zfill(2)}-{_m.group(3).zfill(2)}"
+              _nippo_map.setdefault(_dk, []).append({
+                  "明細No": _nrec.get("meisai_no",""),
+                  "品名":   _nrec_hinmei,
+                  "作業者": _sa_str,
+                  "箱数":   _hako,
+                  "入数":   _nrec_irisu,
+                  "切断工数": _nrec_kosuu,
+                  "状態":   "✓ 完了",
+              })
+              _pushed = True
+          if not _pushed and _nrec.get("kakoubi"):
+              _kb = _nrec["kakoubi"].strip()
+              _m2 = _re_np.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', _kb)
+              _dk2 = f"20{_m2.group(1)}-{_m2.group(2).zfill(2)}-{_m2.group(3).zfill(2)}" if _m2 else _kb
+              _nippo_map.setdefault(_dk2, []).append({
+                  "明細No": _nrec.get("meisai_no",""),
+                  "品名":   _nrec_hinmei,
+                  "作業者": _sa_str,
+                  "箱数":   _nrec.get("hako_su",0),
+                  "入数":   _nrec_irisu,
+                  "切断工数": _nrec_kosuu,
+                  "状態":   "✓ 完了",
+              })
+
+      if not _nippo_map:
+          st.info("加工Lot（YY.MM.DD形式）が入力されたデータがありません。")
+      else:
+          _WDAY = ["日","月","火","水","木","金","土"]
+          _sorted_dk = sorted(_nippo_map.keys(), reverse=True)
+          _total_days  = len(_sorted_dk)
+          _total_items = sum(len(v) for v in _nippo_map.values())
+          _total_hako  = sum(r["箱数"] for v in _nippo_map.values() for r in v)
+          _total_hon   = sum(r["箱数"] * r["入数"] for v in _nippo_map.values() for r in v)
+
+          # サマリーカード
+          _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+          with _mc1: st.metric("集計日数", f"{_total_days} 日")
+          with _mc2: st.metric("加工件数", f"{_total_items} 件")
+          with _mc3: st.metric("総箱数",   f"{_total_hako:,} C/S")
+          with _mc4: st.metric("総本数",   f"{_total_hon:,} 本" if _total_hon else "—")
+          st.divider()
+
+          # 日別HTML表
+          _np_rows_html = ""
+          for _dk in _sorted_dk:
+              _rows = _nippo_map[_dk]
+              _day_hako = sum(r["箱数"] for r in _rows)
+              _day_hon  = sum(r["箱数"] * r["入数"] for r in _rows)
+              _day_jikan = sum(
+                  r["箱数"] * r["入数"] / r["切断工数"]
+                  for r in _rows if r.get("切断工数") and r["切断工数"] > 0 and r.get("入数")
+              )
+              try:
+                  import datetime as _dt
+                  _d = _dt.date.fromisoformat(_dk)
+                  # Python weekday(): Mon=0..Sun=6  → 日本曜日配列に変換
+                  _wjp = _WDAY[(_d.weekday() + 1) % 7]
+                  _label = f"{_dk} ({_wjp})"
+              except Exception:
+                  _label = _dk
+              _day_hon_str   = f' / {_day_hon:,} 本' if _day_hon else ''
+              _day_jikan_str = f'　⏱ {_day_jikan:.1f}時間/8時間' if _day_jikan > 0 else ''
+              _np_rows_html += (
+                  f'<tr class="dh"><td colspan="5">'
+                  f'📅 {_label}　合計 {_day_hako:,} C/S{_day_hon_str}{_day_jikan_str}'
+                  f'</td></tr>'
+              )
+              for _r in _rows:
+                  _hon_r = _r["箱数"] * _r["入数"] if _r["入数"] else 0
+                  _hako_str = f'{_r["箱数"]:,} C/S' + (f' ({_hon_r:,}本)' if _hon_r else '') if _r["箱数"] else "—"
+                  _np_rows_html += (
+                      f'<tr>'
+                      f'<td class="td-no">{_r["明細No"]}</td>'
+                      f'<td class="td-nm">{_r["品名"]}</td>'
+                      f'<td class="td-sa">{_r["作業者"]}</td>'
+                      f'<td class="td-hk">{_hako_str}</td>'
+                      f'<td class="td-st">{_r["状態"]}</td>'
+                      f'</tr>'
+                  )
+
+          _np_html = f"""<style>
+            body{{margin:0;background:#1c1c1c;color:#e8e8e8;font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
+            table{{border-collapse:collapse;width:100%;}}
+            th{{background:#1a1a1a;color:#aaa;font-size:12px;padding:6px 10px;border-bottom:2px solid #444;
+                text-align:left;white-space:nowrap;position:sticky;top:0;z-index:1;}}
+            td{{padding:5px 10px;border-bottom:1px solid #2a2a2a;white-space:nowrap;}}
+            tr.dh td{{background:#161a20;color:#7ba7d9;font-weight:700;font-size:13px;
+                      border-left:3px solid #7ba7d9;padding:7px 12px;border-bottom:none;}}
+            .td-no{{color:#d97757;font-weight:600;}}
+            .td-nm{{max-width:300px;overflow:hidden;text-overflow:ellipsis;}}
+            .td-sa{{color:#9fc3e0;}}
+            .td-hk{{color:#f5c97b;font-weight:700;text-align:right;}}
+            .td-st{{color:#2e9e5b;font-weight:600;}}
+          </style>
+          <div style="overflow:auto;max-height:560px;">
+          <table>
+            <thead><tr>
+              <th>明細No</th><th>品名</th><th>作業者</th>
+              <th style="text-align:right">箱数</th><th>状態</th>
+            </tr></thead>
+            <tbody>{_np_rows_html}</tbody>
+          </table></div>"""
+          _ncomp.html(_np_html, height=620, scrolling=False)
 
     st.stop()
 
@@ -3071,10 +3222,7 @@ if page_sel == "請求":
     if not _seikyuu_nittei:
         st.info("日程データがありません。SGT.xlsm を確認してください。")
     else:
-<<<<<<< HEAD
         _html_src = _html_src.replace("</body>", _CHOHYO_INJECT_SEIKYUU + "</body>", 1)
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         _scomp.html(_html_src, height=_iframe_h, scrolling=True)
 
     st.stop()
@@ -3155,7 +3303,6 @@ if page_sel == "配送":
         "const VFDB_LIST = [];",
         "const VFDB_LIST = " + _json_h.dumps(_vfdb_list_h, ensure_ascii=False) + ";"
     )
-<<<<<<< HEAD
     # ── iframe内に「保管庫に保存」ボタンを注入（表示中の週をそのままPDF化）──
     _haiso_html = _haiso_html.replace("</body>", _CHOHYO_INJECT_HAISO + "</body>", 1)
     _kcomp_h.html(_haiso_html, height=900, scrolling=True)
@@ -3289,11 +3436,6 @@ if page_sel == "帳票保管庫":
                                    key=f"ar_dl_{_i}", use_container_width=True)
     st.stop()
 
-=======
-    _kcomp_h.html(_haiso_html, height=900, scrolling=True)
-    st.stop()
-
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 # 準備中ページ
 # ══════════════════════════════════════════════════════════
 if page_sel != "依頼書保管":
@@ -3704,10 +3846,7 @@ if act_complete:
         st.warning("チェックの付いた案件がありません。")
     else:
         kakou_dict = _load_kakou_dict()
-<<<<<<< HEAD
         _jsonl_log("complete", {"count": len(checked)})
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
         _up_r = os.environ.get("USERPROFILE", "")
         _vfdb_candidates = [
             BASE_DIR / "vfdb.json",
@@ -3891,7 +4030,6 @@ if act_complete:
             ok, msg = _merge_pdfs_pdftk(pdf_list, str(merged))
             if ok:
                 st.success(f"完了！ {len(pdf_list)} 件 → {merged.name}")
-<<<<<<< HEAD
                 # ── 帳票保管庫へ自動コピー（納品明細書／年/月）──
                 try:
                     _now_ar  = datetime.now()
@@ -3902,8 +4040,6 @@ if act_complete:
                     st.caption(f"🗄 保管庫に保存: 納品明細書/{_now_ar:%Y}/{_now_ar:%m}/{merged.name}")
                 except Exception as _earch:
                     st.caption(f"※保管庫コピー失敗: {_earch}")
-=======
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
                 with open(merged, "rb") as _mf:
                     st.download_button(
                         label=f"📄 {merged.name} をダウンロード",
@@ -4126,113 +4262,4 @@ else:
       if(!sc) return -1;
       const rows = sc.querySelectorAll('[role="row"]');
       const scRect = sc.getBoundingClientRect();
-      const relY = clientY - scRect.top;
-      const scrolledY = relY + sc.scrollTop;
-      let headerH = 35, rowH = 35;
-      if(rows.length >= 1) headerH = rows[0].getBoundingClientRect().height || 35;
-      if(rows.length >= 2) rowH   = rows[1].getBoundingClientRect().height || 35;
-      if(scrolledY < headerH) return -1;
-      return Math.floor((scrolledY - headerH) / rowH);
-    }}
-
-    // フラグ列（第1列）の幅: gridcell で取れなければ固定値
-    function getFirstColWidth(){{
-      const cell = doc.querySelector('.dvn-scroller [role="gridcell"][aria-colindex="1"]');
-      return cell ? cell.offsetWidth : 55;
-    }}
-
-    function onPointerDown(e){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(!sc) return;
-      const rect = sc.getBoundingClientRect();
-      const relX = e.clientX - rect.left;
-      const row  = rowFromClientY(e.clientY);
-
-      if(relX >= getFirstColWidth()){{
-        // フラグ列以外 → 選択ドラッグ開始として記録
-        _dragging = true;
-        _selStart = row;
-        _selEnd   = row;
-        const url = new URL(win.location.href);
-        url.searchParams.delete('_sgt_sel');
-        win.history.replaceState(null, '', url.toString());
-      }} else {{
-        // フラグ列クリック → 記録済み選択範囲で一括適用
-        _dragging = false;
-        const url = new URL(win.location.href);
-        if(_selStart >= 0 && _selEnd >= 0 && _selStart !== _selEnd){{
-          const minR = Math.min(_selStart, _selEnd);
-          const maxR = Math.max(_selStart, _selEnd);
-          const sel  = Array.from({{length: maxR - minR + 1}}, (_, i) => minR + i);
-          url.searchParams.set('_sgt_sel', sel.join(','));
-        }} else {{
-          url.searchParams.delete('_sgt_sel');
-        }}
-        win.history.replaceState(null, '', url.toString());
-      }}
-    }}
-
-    function onPointerMove(e){{
-      if(!_dragging || e.buttons !== 1) return;
-      const r = rowFromClientY(e.clientY);
-      if(r >= 0) _selEnd = r;
-    }}
-
-    function attachListeners(){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(sc && !sc._sgtSelOn){{
-        sc._sgtSelOn = true;
-        sc.addEventListener('pointerdown', onPointerDown, {{capture:true}});
-        sc.addEventListener('pointermove', onPointerMove, {{passive:true}});
-        sc.addEventListener('pointerup',   ()=>{{ _dragging=false; }}, {{passive:true}});
-      }}
-    }}
-    const selObs = new MutationObserver(attachListeners);
-    selObs.observe(doc.body, {{childList:true, subtree:true}});
-    [200, 600, 1200].forEach(t=>setTimeout(attachListeners, t));
-  }})();
-
-  // ── 列ホバー（既存） ──
-  (function injectColHL(){{
-    const ORANGE_COL = "rgba(255,140,40,0.13)";
-    function applyTo(root){{
-      root.querySelectorAll('[role="columnheader"]').forEach((th,ci)=>{{
-        th.addEventListener("mouseenter",()=>{{
-          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
-            td.style.background=ORANGE_COL;}});
-          th.style.background=ORANGE_COL;
-        }});
-        th.addEventListener("mouseleave",()=>{{
-          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
-            td.style.background="";}});
-          th.style.background="";
-        }});
-      }});
-    }}
-    const obs=new MutationObserver(()=>{{
-      doc.querySelectorAll('iframe').forEach(f=>{{
-        try{{ if(f.contentDocument) applyTo(f.contentDocument); }}catch(e){{}}
-      }});
-    }});
-    obs.observe(doc.body,{{childList:true,subtree:true}});
-  }})();
-}})();
-</script>""", height=0, scrolling=False)
-
-    st.data_editor(
-        df,
-        use_container_width=True,
-        height=650,
-        column_config={
-            "フラグ"      : st.column_config.CheckboxColumn("フラグ", help="チェックで起票フラグON"),
-            "加工時間(h)" : st.column_config.NumberColumn(format="%.1f h"),
-            "単価"        : st.column_config.NumberColumn(format="¥%d"),
-            "数量"        : st.column_config.NumberColumn(format="%d"),
-        },
-        disabled=disabled_cols,
-        hide_index=True,
-        key="order_editor",
-        on_change=_apply_flag_edits,
-    )
-
-st.markdown('<div style="height:50px"></div>', unsafe_allow_html=True)
+      const relY = clientY
