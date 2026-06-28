@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>VFAP Mobile</title>
+  <style>
+    :root {
+      --bg:        #0d0f18;
+      --surface:   #161929;
+      --surface-2: #1c2035;
+      --bg-2:      #12151f;
+      --border:    rgba(255,255,255,0.09);
+      --border-2:  rgba(255,255,255,0.15);
+      --text:      #e2e8f0;
+      --text-sub:  #94a3b8;
+      --text-faint:#4e5e74;
+      --accent:    #6366f1;
+      --accent-2:  #818cf8;
+      --warning:   #FBB040;
+      --success:   #4ADE80;
+      --danger:    #F87171;
+      --proc1:     rgba(133,183,235,0.85);
+      --proc2:     rgba(160,160,160,0.65);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif;
+      overflow: hidden;
+    }
+    body { display: flex; flex-direction: column; }
+
+    /* ヘッダー */
+    #app-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      height: 44px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border-2);
+      position: relative;
+    }
+    #app-header::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 60%, transparent 100%);
+    }
+    .header-logo { display: flex; align-items: center; gap: 8px; }
+    .header-logo-mark {
+      width: 24px; height: 24px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 800; color: #fff;
+      letter-spacing: -0.5px;
+    }
+    .header-logo-text { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: 0.05em; }
+    .header-logo-sub  { font-size: 10px; color: var(--text-faint); letter-spacing: 0.02em; }
+    #header-date { font-size: 10px; color: var(--text-faint); text-align: right; line-height: 1.4; }
+
+    /* タブ */
+    #tabs {
+      display: flex;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      padding: 0 4px;
+    }
+    .tab-btn {
+      flex: 1; padding: 10px 0;
+      background: none; border: none;
+      color: var(--text-faint);
+      font-size: 12px; font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+      letter-spacing: 0.03em;
+    }
+    .tab-btn.active { color: var(--accent-2); border-bottom-color: var(--accent); }
+
+    /* ページ */
+    .page { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+    .page.active { display: flex; }
+
+    .status-msg {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--text-faint); font-size: 13px; padding: 24px; text-align: center;
+    }
+
+    /* 同期ボタン */
+    #sync-btn {
+      position: fixed; bottom: 20px; right: 16px;
+      width: 44px; height: 44px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      border: none; font-size: 20px; cursor: pointer;
+      box-shadow: 0 2px 16px rgba(99,102,241,.5);
+      z-index: 200; line-height: 1;
+      transition: transform .15s, box-shadow .15s;
+    }
+    #sync-btn:active { transform: scale(.92); box-shadow: 0 1px 8px rgba(99,102,241,.3); }
+    #sync-btn.spinning { animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 更新日時 */
+    #saved-at {
+      flex-shrink: 0; text-align: center;
+      font-size: 10px; color: var(--text-faint);
+      padding: 3px 0 2px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-2);
+    }
+
+    /* ガントチャート */
+    #gantt-wrap { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; }
+    #gantt-inner { display: inline-block; min-width: 100%; }
+
+    /* 配送タブ */
+    #haiso-wrap {
+      flex: 1; overflow-y: auto;
+      padding: 10px 10px 80px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .haiso-section { margin-bottom: 16px; }
+
+    /* 日付ヘッダー 2倍太く */
+    .haiso-section-title {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--text);
+      letter-spacing: .04em;
+      padding: 6px 8px 8px;
+      border-bottom: 1.5px solid var(--border-2);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .haiso-section-title::before {
+      content: '';
+      display: inline-block;
+      width: 3px; height: 14px;
+      background: var(--accent);
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .haiso-section-title.today-title { color: var(--warning); }
+    .haiso-section-title.today-title::before { background: var(--warning); }
+
+    .haiso-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .haiso-col-header {
+      font-size: 10px; font-weight: 800;
+      padding: 3px 6px 5px;
+      border-radius: 4px 4px 0 0;
+      margin-bottom: 4px;
+      letter-spacing: 0.06em;
+    }
+    .haiso-col-header.ac { color: var(--warning); border-bottom: 2px solid var(--warning); }
+    .haiso-col-header.ad { color: var(--success); border-bottom: 2px solid var(--success); }
+    .haiso-item {
+      background: var(--surface);
+      border-radius: 6px; padding: 7px 9px;
+      margin-bottom: 5px;
+      border: 1px solid var(--border);
+      border-left-width: 2px;
+      border-left-color: transparent;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .haiso-item.ac { border-left-color: var(--warning); }
+    .haiso-item.ad { border-left-color: var(--success); }
+    .haiso-name { font-size: 11px; font-weight: 600; color: var(--text); line-height: 1.3; }
+    .haiso-sub  { font-size: 10px; color: var(--text-faint); }
+    .haiso-empty { font-size: 10px; color: var(--text-faint); padding: 4px 6px; }
+  </style>
+</head>
+<body>
+
+  <div id="app-header">
+    <div class="header-logo">
+      <div class="header-logo-mark">VF</div>
+      <div>
+        <div class="header-logo-text">VFAP</div>
+        <div class="header-logo-sub">Mobile Viewer</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div id="header-date"></div>
+      <button onclick="hardReload()" style="font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid var(--border-2);background:var(--surface);color:var(--text-sub);cursor:pointer;white-space:nowrap;">更新</button>
+    </div>
+  </div>
+
+  <div id="tabs">
+    <button class="tab-btn active" onclick="showTab('gantt')">&#x1F4C5; 日程</button>
+    <button class="tab-btn"        onclick="showTab('haiso')">&#x1F69A; 配送</button>
+  </div>
+
+  <div id="page-gantt" class="page active">
+    <div id="gantt-status" class="status-msg">読み込み中…</div>
+    <div id="gantt-wrap" style="display:none"><div id="gantt-inner"></div></div>
+    <div id="saved-at"></div>
+  </div>
+
+  <div id="page-haiso" class="page">
+    <div id="haiso-status" class="status-msg" style="display:none">読み込み中…</div>
+    <div id="haiso-wrap"></div>
+  </div>
+
+  <button id="sync-btn" title="再読み込み" onclick="loadData()">&#x21BB;</button>
+
+<script>
+const GIST_API = 'https://api.github.com/gists/34f07c829b92ea7141367874f8777512';
+const SC  = 9;
+const LW  = 155;
+const h2px   = h => Math.round(h * SC);
+const escH   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const DAYS_JP = ['日','月','火','水','木','金','土'];
+
+(function() {
+  const now = new Date();
+  const dow = DAYS_JP[now.getDay()];
+  const el = document.getElementById('header-date');
+  if (el) {
+    const yy = now.getFullYear();
+    const mm = String(now.getMonth()+1).padStart(2,'0');
+    const dd = String(now.getDate()).padStart(2,'0');
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mi = String(now.getMinutes()).padStart(2,'0');
+    el.innerHTML = yy+'/'+mm+'/'+dd+'('+dow+')<br>'+hh+':'+mi;
+  }
+})();
+
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) =>
+    b.classList.toggle('active', ['gantt','haiso'][i] === name));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+}
+
+function abbrevName(n) {
+  if (!n) return '';
+  if (/^採光ルーバー/.test(n)) return 'ルーバーB';
+  if (/^灯具/.test(n))  { const m = n.match(/L=[\d.]+/); return '灯具 ' + (m ? m[0] : '').trim(); }
+  if (/^8FL/.test(n))   { const m = n.match(/L=[\d.]+/); return '8FL '  + (m ? m[0] : '').trim(); }
+  return n.length > 16 ? n.slice(0, 15) + '…' : n;
+}
+
+async function loadData() {
+  const btn = document.getElementById('sync-btn');
+  btn.classList.add('spinning');
+  document.getElementById('gantt-status').textContent = '読み込み中…';
+  document.getElementById('gantt-status').style.display = '';
+  document.getElementById('gantt-wrap').style.display   = 'none';
+  try {
+    const res = await fetch(GIST_API, { headers: { 'Accept': 'application/vnd.github+json' } });
+    if (!res.ok) throw new Error('Gist取得失敗 HTTP ' + res.status);
+    const gist = await res.json();
+    const raw  = gist.files && gist.files['reminder_sync.json'];
+    if (!raw) throw new Error('reminder_sync.json がGistにありません');
+    const data = JSON.parse(raw.content);
+    const gr = data.gantt_render;
+    if (!gr) throw new Error('gantt_renderデータなし。VFAPで「保存」を実行してください。');
+    renderGantt(gr);
+    renderHaiso(gr.haiso || {});
+    const ts = gr.saved_at ? new Date(gr.saved_at).toLocaleString('ja-JP') : '';
+    document.getElementById('saved-at').textContent = ts ? '更新: ' + ts : '';
+  } catch(e) {
+    document.getElementById('gantt-status').textContent = '⚠ ' + e.message;
+    document.getElementById('gantt-status').style.display = '';
+    document.getElementById('gantt-wrap').style.display   = 'none';
+  } finally {
+    btn.classList.remove('spinning');
+  }
+}
+
+function renderGantt(gr) {
+  const rows       = gr.gantt        || [];
+  const days       = gr.days         || [];
+  const barOffset  = gr.bar_offset   || 0;
+  const hrsPerSlot = gr.hrs_per_slot || 4;
+  const hrsPerDay  = hrsPerSlot * 2;
+
+  const now = new Date();
+  const todayMMDD = String(now.getMonth()+1).padStart(2,'0') + '/' + String(now.getDate()).padStart(2,'0');
+  const todayIdx = days.findIndex(d => d[0] === todayMMDD);
+
+  const dayH    = i => i * hrsPerDay + barOffset;
+  const TODAY_H = todayIdx >= 0 ? dayH(todayIdx) : barOffset;
+  const todayOff = h2px(TODAY_H);
+
+  function mmddToH(mmdd, half) {
+    if (!mmdd) return null;
+    const idx = days.findIndex(d => d[0] === mmdd);
+    if (idx < 0) return null;
+    return dayH(idx) + (half ? hrsPerSlot : 0);
+  }
+
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const visRows = rows.filter(r => {
+    if (r.remaining > 0) return true;
+    if (r.ad) { const [m, d] = r.ad.split('/').map(Number); return new Date(now.getFullYear(), m-1, d) >= today0; }
+    return false;
+  });
+
+  if (visRows.length === 0) {
+    document.getElementById('gantt-status').textContent = '表示するデータがありません';
+    document.getElementById('gantt-status').style.display = '';
+    document.getElementById('gantt-wrap').style.display   = 'none';
+    return;
+  }
+
+  const maxH = Math.max(...visRows.map(r => r.startH + r.remaining), TODAY_H + 24);
+  const TL   = Math.max((maxH - TODAY_H) * SC + 60, 480);
+  const halfDayPx = h2px(hrsPerSlot);
+  const fullDayPx = halfDayPx * 2;
+
+  let dayGridLines = '';
+  let axTicks = '';
+
+  const tDow = DAYS_JP[now.getDay()];
+  axTicks += '<span style="position:absolute;font-size:10px;color:#E24B4A;font-weight:700;top:3px;left:1px;width:'+fullDayPx+'px;white-space:nowrap;overflow:hidden;">'+(now.getMonth()+1)+'/'+now.getDate()+'('+tDow+')</span>';
+
+  days.forEach((d, i) => {
+    const x = h2px(dayH(i)) - todayOff;
+    if (x < -fullDayPx) return;
+    const [mm, dd] = d[0].split('/').map(Number);
+    const dt = new Date(now.getFullYear(), mm-1, dd);
+    const isMon = dt.getDay() === 1;
+    const isMth = dt.getDate() === 1;
+    const lineC = isMth ? '#6B9FD4' : isMon ? 'rgba(255,255,255,.45)' : 'rgba(255,255,255,.18)';
+    const lineW = isMth ? 2 : 1;
+    dayGridLines += '<div style="position:absolute;top:0;bottom:0;left:'+x+'px;width:'+lineW+'px;background:'+lineC+';z-index:1;pointer-events:none;"></div>';
+    dayGridLines += '<div style="position:absolute;top:0;bottom:0;left:'+(x+halfDayPx)+'px;width:1px;background:rgba(255,255,255,.06);z-index:1;pointer-events:none;"></div>';
+    if (x < 20) return;
+    const dow = DAYS_JP[dt.getDay()];
+    axTicks += '<span style="position:absolute;font-size:10px;color:#fff;top:3px;left:'+(x+1)+'px;width:'+fullDayPx+'px;white-space:nowrap;overflow:hidden;">'+mm+'/'+dd+'('+dow+')</span>';
+  });
+
+  const todayLine = '<div style="position:absolute;top:0;bottom:0;left:0;width:2px;background:#E24B4A;z-index:5;pointer-events:none;"></div>';
+  const stickyL = 'flex:0 0 '+LW+'px;position:sticky;left:0;z-index:8;border-right:1px solid var(--border);';
+
+  let html = '<div style="position:relative;display:inline-block;min-width:'+(LW+TL)+'px;width:100%;">';
+  html += '<div style="display:flex;height:22px;position:sticky;top:0;z-index:10;border-bottom:1px solid var(--border);">';
+  html += '<div style="'+stickyL+'background:var(--surface-2);height:22px;z-index:11;"></div>';
+  html += '<div style="position:relative;flex:1;height:22px;background:var(--surface-2);overflow:hidden;">'+dayGridLines+todayLine+axTicks+'</div></div>';
+  html += '<div style="display:flex;height:22px;position:sticky;top:22px;z-index:9;border-bottom:1px solid var(--border);">';
+  html += '<div style="'+stickyL+'background:var(--bg-2);height:22px;z-index:10;display:flex;align-items:center;font-size:10px;font-weight:700;color:var(--text-faint);padding:0 6px;">品名 / 進捗 · 日程</div>';
+  html += '<div style="position:relative;flex:1;height:22px;background:var(--bg-2);overflow:hidden;">'+dayGridLines+todayLine+'</div></div>';
+
+  visRows.forEach(row => {
+    const barColor = row.color === 'proc1' ? 'var(--proc1)' : 'var(--proc2)';
+    const barX = Math.max(0, h2px(row.startH) - todayOff);
+    const barW = row.remaining > 0 ? Math.max(h2px(row.remaining) - 1, 4) : 0;
+    const acH = mmddToH(row.ac, 1); const adH = mmddToH(row.ad, 1); const afH = mmddToH(row.af, 1);
+    const acX = acH !== null ? h2px(acH) - todayOff : null;
+    const adX = adH !== null ? h2px(adH) - todayOff : null;
+    const afX = afH !== null ? h2px(afH) - todayOff : null;
+    const mkS = 'position:absolute;top:26px;height:14px;width:'+halfDayPx+'px;z-index:4;border-radius:2px;border:1px solid rgba(255,255,255,.2);';
+    let bar = dayGridLines + todayLine;
+    if (barW > 0) bar += '<div style="position:absolute;top:5px;height:14px;left:'+barX+'px;width:'+barW+'px;border-radius:3px;background:'+barColor+';z-index:2;"></div>';
+    const kOverlapsE = row.af && row.ad && row.af === row.ad;
+    if (adX !== null) {
+      if (kOverlapsE) bar += '<div style="'+mkS+'left:'+adX+'px;overflow:hidden;"><div style="position:absolute;top:0;bottom:0;left:0;width:50%;background:rgba(74,222,128,.88);"></div><div style="position:absolute;top:0;bottom:0;right:0;width:50%;background:rgba(220,60,60,.88);"></div></div>';
+      else bar += '<div style="'+mkS+'left:'+adX+'px;background:rgba(74,222,128,.85);"></div>';
+    }
+    if (acX !== null) bar += '<div style="'+mkS+'left:'+acX+'px;background:rgba(244,196,48,.85);"></div>';
+    if (afX !== null && !kOverlapsE) bar += '<div style="'+mkS+'left:'+afX+'px;background:rgba(220,60,60,.85);"></div>';
+
+    const pctColor = row.pct >= 100 ? 'var(--success)' : 'var(--text-sub)';
+    const qtyDisp = row.qty > 0 ? row.done+'/'+row.qty : '';
+    const acDisp = row.ac ? row.ac.replace(/^0/, '') : '—';
+    const adDisp = row.ad ? row.ad.replace(/^0/, '') : '—';
+    const afDisp = row.af ? row.af.replace(/^0/, '') : '—';
+    html += '<div style="display:flex;height:52px;border-bottom:1px solid rgba(255,255,255,.07);">';
+    html += '<div style="'+stickyL+'background:var(--surface);height:52px;padding:5px 6px;display:flex;flex-direction:column;justify-content:center;gap:4px;overflow:hidden;">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;">';
+    html += '<div style="font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">'+escH(abbrevName(row.nm))+'</div>';
+    html += '<div style="font-size:10px;font-weight:700;color:'+pctColor+';white-space:nowrap;padding-left:4px;flex-shrink:0;">'+escH(qtyDisp)+'</div></div>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;font-size:10px;">';
+    html += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;"><span style="color:var(--warning);font-weight:700;">引</span><span style="color:var(--text-sub);"> '+escH(acDisp)+'</span><span style="color:var(--text-faint);">·</span><span style="color:var(--success);font-weight:700;">納</span><span style="color:var(--text-sub);"> '+escH(adDisp)+'</span></div>';
+    html += '<div style="white-space:nowrap;padding-left:4px;flex-shrink:0;"><span style="color:var(--danger);font-weight:700;">期</span><span style="color:var(--danger);"> '+escH(afDisp)+'</span></div></div>';
+    html += '</div><div style="position:relative;flex:1;height:52px;overflow:hidden;">'+bar+'</div></div>';
+  });
+
+  html += '</div>';
+  document.getElementById('gantt-inner').innerHTML = html;
+  document.getElementById('gantt-status').style.display = 'none';
+  const wrap = document.getElementById('gantt-wrap');
+  wrap.style.display = '';
+  requestAnimationFrame(() => { wrap.scrollLeft = Math.max(0, todayOff - 80); });
+}
+
+function renderHaiso(haiso) {
+  const now    = new Date();
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  function mmddToDate(mmdd) {
+    if (!mmdd) return null;
+    const [m, d] = mmdd.split('/').map(Number);
+    const dt = new Date(now.getFullYear(), m-1, d);
+    if (today0 - dt > 120 * 86400000) dt.setFullYear(dt.getFullYear() + 1);
+    return dt;
+  }
+  function fmtDate(dt) {
+    if (!dt) return '—';
+    const dow = DAYS_JP[dt.getDay()];
+    return (dt.getMonth()+1)+'/'+dt.getDate()+'('+dow+')';
+  }
+
+  const groups = new Map();
+  const addItem = (type, dateVal, name, sub) => {
+    const dt = mmddToDate(dateVal);
+    if (!dt || dt < today0) return;
+    const key = dt.toISOString().slice(0, 10);
+    if (!groups.has(key)) groups.set(key, { date: dt, ac: [], ad: [] });
+    groups.get(key)[type].push({ name, sub });
+  };
+  (haiso.ac_side || []).forEach(i => addItem('ac', i.date, i.ag || '', ''));
+  (haiso.ad_side || []).forEach(i => addItem('ad', i.date, i.d  || '', i.u || ''));
+
+  const sorted = [...groups.values()].sort((a, b) => a.date - b.date);
+  const wrap = document.getElementById('haiso-wrap');
+  if (sorted.length === 0) {
+    wrap.innerHTML = '<div class="status-msg" style="height:100px;">配送予定なし</div>';
+    return;
+  }
+
+  const itemsHtml = (arr, type) => arr.length
+    ? arr.map(i => '<div class="haiso-item '+type+'"><div class="haiso-name">'+escH(i.name)+'</div>'+(i.sub ? '<div class="haiso-sub">'+escH(i.sub)+'</div>' : '')+'</div>').join('')
+    : '<div class="haiso-empty">—</div>';
+
+  let html = '';
+  sorted.forEach(g => {
+    const isToday = g.date.getTime() === today0.getTime();
+    const dateLabel = isToday ? '本日 ' + fmtDate(g.date) : fmtDate(g.date);
+    const titleClass = isToday ? 'haiso-section-title today-title' : 'haiso-section-title';
+    /* 列順：納品(ad) → 引取(ac) */
+    html += '<div class="haiso-section">';
+    html += '<div class="'+titleClass+'">'+escH(dateLabel)+'</div>';
+    html += '<div cl
