@@ -1551,6 +1551,109 @@ def _gist_push_async():
             _gist_push_running.release()
     threading.Thread(target=_run, daemon=True).start()
 
+
+def _update_gantt_render(base_dir: Path, rows: list) -> None:
+    """
+    加工記録でdoneが更新されたとき、gantt_render.jsonをPython側で再計算して上書きする。
+    computeGanttRender()（nittei.js）と同じロジック。
+    gantt_render.jsonが存在しない場合（保存ボタンが未押下）はスキップ。
+    """
+    import datetime as _dt
+    gantt_path = base_dir / "gantt_render.json"
+    if not gantt_path.exists():
+        return
+    try:
+        gr = json.loads(gantt_path.read_text(encoding="utf-8"))
+        bar_offset   = float(gr.get("bar_offset", 0))
+        days         = gr.get("days", [])   # [["MM/DD", "曜日"], ...]
+    except Exception:
+        return
+
+    today = _dt.date.today()
+
+    def _is_auto_hide(r: dict) -> bool:
+        qty  = r.get("qty") or 0
+        done = r.get("done") or 0
+        if not qty or done < qty:
+            return False
+        ad = r.get("ad")
+        if not ad:
+            return False
+        try:
+            m, d_v = (int(x) for x in str(ad).split("/"))
+            ad_date = _dt.date(today.year, m, d_v)
+            return ad_date < today
+        except Exception:
+            return False
+
+    # vfdb備考マップを構築（引取の表示名に使用）: 品名(正規化) → 備考
+    import unicodedata as _ud, re as _re2
+    def _norm_nm(s):
+        return _re2.sub(r"\s+", "", _ud.normalize("NFKC", str(s or "")))
+    _vfdb_spec = build_vfdb_spec_by_name()
+    vfdb_biko_map = {k: (v.get("biko") or "") for k, v in _vfdb_spec.items()}
+
+    cum_h = 0.0
+    gantt_rows: list[dict] = []
+    ac_side:    list[dict] = []
+    ad_side:    list[dict] = []
+
+    for r in rows:
+        nm            = r.get("nm") or ""
+        qty           = int(r.get("qty") or 0)
+        done          = int(r.get("done") or 0)
+        hours         = float(r.get("hours") or 0)
+        ac            = r.get("ac") or None
+        ad            = r.get("ad") or None
+        af            = r.get("af") or None
+        parallel_from = r.get("parallelFrom") or None
+        meisai_no     = str(r.get("no") or "")
+
+        pct100    = qty > 0 and done >= qty
+        remaining = 0.0 if pct100 else (hours * (qty - done) / qty if qty > 0 else hours)
+
+        if parallel_from:
+            pi      = next((i for i, d in enumerate(days) if d[0] == parallel_from), -1)
+            start_h = float(pi * 8) if pi >= 0 else cum_h
+            end_h   = start_h + remaining
+            cum_h   = end_h
+        else:
+            start_h = cum_h
+            cum_h  += remaining
+            end_h   = cum_h
+
+        # autoHide行はganttに含めない（haiso側も除外、buildBodyと同じ挙動）
+        if _is_auto_hide(r):
+            continue
+
+        pct_val = round(done / qty * 100) if qty else 0
+        gantt_rows.append({
+            "nm":          nm,
+            "startH":      round((start_h + bar_offset) * 100) / 100,
+            "remaining":   round(remaining * 100) / 100,
+            "pct":         pct_val,
+            "ac":          ac,
+            "ad":          ad,
+            "af":          af,
+            "parallelFrom": parallel_from,
+            "color":       "proc1" if "灯具" in nm else "proc2",
+        })
+        if ac:
+            # 引取の表示名：vfdb備考 → 品名
+            ag = vfdb_biko_map.get(_norm_nm(nm)) or nm
+            ac_side.append({"date": ac, "ag": ag})
+        if ad:
+            ad_side.append({"date": ad, "d": nm, "u": f"{done}/{qty}"})
+
+    gr["gantt"]    = gantt_rows
+    gr["haiso"]    = {"ac_side": ac_side, "ad_side": ad_side}
+    gr["saved_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    try:
+        gantt_path.write_text(json.dumps(gr, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 class _SaveHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1573,12 +1676,25 @@ class _SaveHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length))
+            # 新フォーマット: {"rows": [...], "gantt_render": {...}}
+            # 旧フォーマット: [...] （後方互換）
+            if isinstance(data, list):
+                rows = data
+                gantt_render = None
+            else:
+                rows = data.get("rows", [])
+                gantt_render = data.get("gantt_render")
             nittei_path = self.__class__.base_dir / "nittei.json"
             with _save_lock:
                 nittei_path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
                 # 加工完了依頼の sgt_status.json 同期（qty==done の依頼を加工済に更新）
-                _sync_kakozu_status(self.__class__.base_dir, data)
+                _sync_kakozu_status(self.__class__.base_dir, rows)
+                # gantt_render.json 保存（モバイル閲覧用・VFAPの計算済み描画データ）
+                if gantt_render:
+                    gantt_path = self.__class__.base_dir / "gantt_render.json"
+                    gantt_path.write_text(
+                        json.dumps(gantt_render, ensure_ascii=False, indent=2), encoding="utf-8")
             _gist_push_async()  # 保存後にGistへ自動push
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -1785,6 +1901,7 @@ class _KakouHandler(BaseHTTPRequestHandler):
                                 _np.write_text(
                                     json.dumps(_nrows, ensure_ascii=False, indent=2),
                                     encoding="utf-8")
+                                _update_gantt_render(self.__class__.base_dir, _nrows)
                 except Exception:
                     pass
                 # ① 段階移行：1案件1JSONも書き出す（失敗してもノート保存には影響させない）
@@ -2114,6 +2231,7 @@ def build_vfdb_spec_by_name() -> dict:
             "irisu":  _v(r.get("梱包")),
             "hakosu": _v(r.get("梱包箱使用枚数")),
             "hoho1":  _v(r.get("梱包方法")),
+            "biko":   _v(r.get("備考")),
             "hoho2":  _v(r.get("備考１")),
             "hoho3":  _v(r.get("備考２")),
             "kosuu":  _v(r.get("切断工数")),  # 切断工数(本/h) — 日程表の進捗工数表示用
@@ -2344,7 +2462,11 @@ def load_nittei_rows() -> list:
         return []
     try:
         with open(nittei_path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # 旧サーバーが誤って {rows:[...], gantt_render:{...}} 形式で保存した場合に対応
+        if isinstance(data, dict):
+            return data.get("rows", [])
+        return data
     except Exception as e:
         st.error(f"nittei.json 読み込みエラー: {e}")
         return []
@@ -2725,6 +2847,11 @@ if page_sel.startswith("日程表"):
     days_js = _json.dumps(working_days, ensure_ascii=False)
 
     html_src = (Path(__file__).resolve().parent / "日程ページ_試作.html").read_text(encoding="utf-8")
+    # nittei.js を読み込んでプレースホルダーに埋め込む
+    _nittei_js_path = Path(__file__).resolve().parent / "nittei.js"
+    if _nittei_js_path.exists():
+        _nittei_js = _nittei_js_path.read_text(encoding="utf-8")
+        html_src = html_src.replace("<!-- NITTEI_JS -->", f"<script>\n{_nittei_js}\n</script>")
     html_src = _re.sub(r"const days=\[.*?\];",  f"const days={days_js};",  html_src, flags=_re.DOTALL)
     html_src = _re.sub(r"TODAY_DAY=\d+",          f"TODAY_DAY={today_idx}",  html_src)
     html_src = _re.sub(r"let rows=\[.*?\];",     f"let rows={rows_js};",    html_src, flags=_re.DOTALL)
@@ -2909,7 +3036,30 @@ if page_sel == "加工記録":
     # ── 日報タブ ──────────────────────────────────────────
     with _tab_nippo:
       import re as _re_np
+      import unicodedata as _ud_np
       import streamlit.components.v1 as _ncomp
+
+      # 品名 → 入数(梱包) のマップを vfdb から構築
+      def _np_norm(s):
+          return _re_np.sub(r"\s+", "", _ud_np.normalize("NFKC", str(s if s is not None else "")))
+      _np_irisu_map: dict = {}
+      _np_kosuu_map: dict = {}
+      try:
+          _np_vfdb = build_vfdb_spec_by_name()
+          _np_irisu_map = {k: v.get("irisu","") for k, v in _np_vfdb.items()}
+          _np_kosuu_map = {k: v.get("kosuu","") for k, v in _np_vfdb.items()}
+      except Exception:
+          pass
+
+      def _np_get_irisu(hinmei: str) -> int:
+          raw = _np_irisu_map.get(_np_norm(hinmei), "")
+          try: return int(float(str(raw).replace(",","").strip()))
+          except: return 0
+
+      def _np_get_kosuu(hinmei: str) -> float:
+          raw = _np_kosuu_map.get(_np_norm(hinmei), "")
+          try: return float(str(raw).replace(",","").strip())
+          except: return 0.0
 
       # lots[].lot = "YY.MM.DD" 形式の日付でグループ化
       _nippo_map: dict = {}  # key: "YYYY-MM-DD", value: list of row dicts
@@ -2919,6 +3069,9 @@ if page_sel == "加工記録":
               _nlots = [{"lot": _nrec["kakou_lot"], "hako": _nrec.get("hako_su", 0)}]
           _sas = [s for s in (_nrec.get("sakushas") or [_nrec.get("sakusha","")]) if s]
           _sa_str = " / ".join(_sas) if _sas else "—"
+          _nrec_hinmei = _nrec.get("hinmei","")
+          _nrec_irisu  = _np_get_irisu(_nrec_hinmei)
+          _nrec_kosuu  = _np_get_kosuu(_nrec_hinmei)
           _pushed = False
           for _le in _nlots:
               _lot = (_le.get("lot") or "").strip()
@@ -2929,9 +3082,11 @@ if page_sel == "加工記録":
               _dk = f"20{_m.group(1)}-{_m.group(2).zfill(2)}-{_m.group(3).zfill(2)}"
               _nippo_map.setdefault(_dk, []).append({
                   "明細No": _nrec.get("meisai_no",""),
-                  "品名":   _nrec.get("hinmei",""),
+                  "品名":   _nrec_hinmei,
                   "作業者": _sa_str,
                   "箱数":   _hako,
+                  "入数":   _nrec_irisu,
+                  "切断工数": _nrec_kosuu,
                   "状態":   "✓ 完了",
               })
               _pushed = True
@@ -2941,9 +3096,11 @@ if page_sel == "加工記録":
               _dk2 = f"20{_m2.group(1)}-{_m2.group(2).zfill(2)}-{_m2.group(3).zfill(2)}" if _m2 else _kb
               _nippo_map.setdefault(_dk2, []).append({
                   "明細No": _nrec.get("meisai_no",""),
-                  "品名":   _nrec.get("hinmei",""),
+                  "品名":   _nrec_hinmei,
                   "作業者": _sa_str,
                   "箱数":   _nrec.get("hako_su",0),
+                  "入数":   _nrec_irisu,
+                  "切断工数": _nrec_kosuu,
                   "状態":   "✓ 完了",
               })
 
@@ -2955,12 +3112,14 @@ if page_sel == "加工記録":
           _total_days  = len(_sorted_dk)
           _total_items = sum(len(v) for v in _nippo_map.values())
           _total_hako  = sum(r["箱数"] for v in _nippo_map.values() for r in v)
+          _total_hon   = sum(r["箱数"] * r["入数"] for v in _nippo_map.values() for r in v)
 
           # サマリーカード
-          _mc1, _mc2, _mc3 = st.columns(3)
+          _mc1, _mc2, _mc3, _mc4 = st.columns(4)
           with _mc1: st.metric("集計日数", f"{_total_days} 日")
           with _mc2: st.metric("加工件数", f"{_total_items} 件")
           with _mc3: st.metric("総箱数",   f"{_total_hako:,} C/S")
+          with _mc4: st.metric("総本数",   f"{_total_hon:,} 本" if _total_hon else "—")
           st.divider()
 
           # 日別HTML表
@@ -2968,22 +3127,29 @@ if page_sel == "加工記録":
           for _dk in _sorted_dk:
               _rows = _nippo_map[_dk]
               _day_hako = sum(r["箱数"] for r in _rows)
+              _day_hon  = sum(r["箱数"] * r["入数"] for r in _rows)
+              _day_jikan = sum(
+                  r["箱数"] * r["入数"] / r["切断工数"]
+                  for r in _rows if r.get("切断工数") and r["切断工数"] > 0 and r.get("入数")
+              )
               try:
                   import datetime as _dt
                   _d = _dt.date.fromisoformat(_dk)
-                  _label = f"{_dk} ({_WDAY[_d.weekday() + 1 if _d.weekday() < 6 else 0]})"
                   # Python weekday(): Mon=0..Sun=6  → 日本曜日配列に変換
                   _wjp = _WDAY[(_d.weekday() + 1) % 7]
                   _label = f"{_dk} ({_wjp})"
               except Exception:
                   _label = _dk
+              _day_hon_str   = f' / {_day_hon:,} 本' if _day_hon else ''
+              _day_jikan_str = f'　⏱ {_day_jikan:.1f}時間/8時間' if _day_jikan > 0 else ''
               _np_rows_html += (
                   f'<tr class="dh"><td colspan="5">'
-                  f'📅 {_label}　合計 {_day_hako:,} C/S'
+                  f'📅 {_label}　合計 {_day_hako:,} C/S{_day_hon_str}{_day_jikan_str}'
                   f'</td></tr>'
               )
               for _r in _rows:
-                  _hako_str = f'{_r["箱数"]:,} C/S' if _r["箱数"] else "—"
+                  _hon_r = _r["箱数"] * _r["入数"] if _r["入数"] else 0
+                  _hako_str = f'{_r["箱数"]:,} C/S' + (f' ({_hon_r:,}本)' if _hon_r else '') if _r["箱数"] else "—"
                   _np_rows_html += (
                       f'<tr>'
                       f'<td class="td-no">{_r["明細No"]}</td>'
@@ -4073,3 +4239,26 @@ else:
 <div id="hl-rows" data-checked="{_checked_idx}" style="display:none"></div>
 """, unsafe_allow_html=True)
 
+    _nav_comp.html(f"""<script>
+(function(){{
+  const doc = window.parent.document;
+  // ── チェック行ハイライト ──
+  const checkedSet = new Set(
+    (doc.getElementById('hl-rows')?.dataset.checked || '')
+    .split(',').filter(Boolean).map(Number)
+  );
+  function applyRowHL(){{
+    const grid = doc.querySelector('.stDataFrameGlideDataEditor');
+    if(!grid) return;
+    grid.querySelectorAll('[role="row"]').forEach((row, pos)=>{{
+      if(pos === 0) return; // ヘッダー行はスキップ
+      const ari = row.getAttribute('aria-rowindex');
+      const idx = ari != null ? Number(ari) - 2 : pos - 1;
+      row.classList.toggle('row-checked', checkedSet.has(idx));
+    }});
+  }}
+  const rowObs = new MutationObserver(applyRowHL);
+  rowObs.observe(doc.body, {{childList:true, subtree:true}});
+  [100, 400, 900].forEach(t => setTimeout(applyRowHL, t));
+
+  // ── 複数行選択 → URL 
