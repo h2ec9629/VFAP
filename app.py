@@ -1586,6 +1586,13 @@ def _update_gantt_render(base_dir: Path, rows: list) -> None:
         except Exception:
             return False
 
+    # vfdb備考マップを構築（引取の表示名に使用）: 品名(正規化) → 備考
+    import unicodedata as _ud, re as _re2
+    def _norm_nm(s):
+        return _re2.sub(r"\s+", "", _ud.normalize("NFKC", str(s or "")))
+    _vfdb_spec = build_vfdb_spec_by_name()
+    vfdb_biko_map = {k: (v.get("biko") or "") for k, v in _vfdb_spec.items()}
+
     cum_h = 0.0
     gantt_rows: list[dict] = []
     ac_side:    list[dict] = []
@@ -1600,6 +1607,7 @@ def _update_gantt_render(base_dir: Path, rows: list) -> None:
         ad            = r.get("ad") or None
         af            = r.get("af") or None
         parallel_from = r.get("parallelFrom") or None
+        meisai_no     = str(r.get("no") or "")
 
         pct100    = qty > 0 and done >= qty
         remaining = 0.0 if pct100 else (hours * (qty - done) / qty if qty > 0 else hours)
@@ -1631,7 +1639,9 @@ def _update_gantt_render(base_dir: Path, rows: list) -> None:
             "color":       "proc1" if "灯具" in nm else "proc2",
         })
         if ac:
-            ac_side.append({"date": ac, "ag": nm})
+            # 引取の表示名：vfdb備考 → 品名
+            ag = vfdb_biko_map.get(_norm_nm(nm)) or nm
+            ac_side.append({"date": ac, "ag": ag})
         if ad:
             ad_side.append({"date": ad, "d": nm, "u": f"{done}/{qty}"})
 
@@ -2221,6 +2231,7 @@ def build_vfdb_spec_by_name() -> dict:
             "irisu":  _v(r.get("梱包")),
             "hakosu": _v(r.get("梱包箱使用枚数")),
             "hoho1":  _v(r.get("梱包方法")),
+            "biko":   _v(r.get("備考")),
             "hoho2":  _v(r.get("備考１")),
             "hoho3":  _v(r.get("備考２")),
             "kosuu":  _v(r.get("切断工数")),  # 切断工数(本/h) — 日程表の進捗工数表示用
@@ -4250,16 +4261,4 @@ else:
   rowObs.observe(doc.body, {{childList:true, subtree:true}});
   [100, 400, 900].forEach(t => setTimeout(applyRowHL, t));
 
-  // ── 複数行選択 → URL params 書き込み（一括チェック用） ──
-  // aria-selected が使えないためマウスドラッグ start/end を自前追跡
-  (function(){{
-    const win = window.parent;
-    let _selStart = -1, _selEnd = -1, _dragging = false;
-
-    // クライアントY → 0ベース行インデックス
-    function rowFromClientY(clientY){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(!sc) return -1;
-      const rows = sc.querySelectorAll('[role="row"]');
-      const scRect = sc.getBoundingClientRect();
-      const relY = clientY
+  // ── 複数行選択 → URL 
