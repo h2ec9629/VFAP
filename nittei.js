@@ -773,6 +773,18 @@ function markClean(){
   window.parent.postMessage({type:'nittei_dirty', dirty:false}, '*');
 }
 
+// ── 加工記録のbikoマップ（引取表示用）─────────────────────────────────────────
+let _kakouBikoMap = new Map(); // meisai_no(string) → biko(string)
+async function _loadKakouBikoMap() {
+  try {
+    const resp = await fetch('http://localhost:' + KAKOU_PORT + '/', { cache: 'no-store' });
+    if (!resp.ok) return;
+    const all = await resp.json();
+    _kakouBikoMap = new Map(all.map(r => [String(r.meisai_no || ''), r.biko || '']));
+  } catch(e) { /* 取得できなくてもnmにフォールバック */ }
+}
+_loadKakouBikoMap(); // ページ起動時に先読み
+
 // ── モバイル閲覧用 描画データを生成 ──────────────────────────────────────────
 // buildBody()と同じ計算ロジックでstartH/remainingを算出し、
 // モバイル側が再計算なしにそのまま描けるデータを返す。
@@ -816,7 +828,11 @@ function computeGanttRender() {
     });
 
     // 配送一覧（autoHide行も含める）
-    if (r.ac) acSide.push({ date: r.ac, ag: r.nm || '' });
+    // 引取の表示名：vfdb備考 → 品名 の優先順
+    if (r.ac) {
+      const _vsp = VFDB_SPEC && VFDB_SPEC[_normNmP(r.nm)];
+      acSide.push({ date: r.ac, ag: (_vsp && _vsp.biko) || r.nm || '' });
+    }
     if (r.ad) adSide.push({ date: r.ad, d: r.nm || '', u: `${r.done}/${r.qty}` });
   });
 
@@ -836,6 +852,7 @@ async function saveRows(){
   const btn = document.getElementById('save-btn');
   if(btn){ btn.disabled=true; btn.textContent='保存中…'; }
   try {
+    await _loadKakouBikoMap(); // 保存直前にbikoを最新化
     const payload = { rows: rows, gantt_render: computeGanttRender() };
     const resp = await fetch('http://localhost:8502/', {
       method:'POST',
@@ -1294,24 +1311,4 @@ async function syncDoneFromKakou(rebuild=true){
   try{
     const resp = await fetch('http://localhost:'+KAKOU_PORT+'/', {cache:'no-store'});
     if(!resp.ok) return;
-    const all = await resp.json();
-    let changed = false;
-    all.forEach(rec=>{
-      if(rec?.nyuko_su == null) return;
-      const idx = rows.findIndex(r=>String(r.no)===String(rec.meisai_no));
-      if(idx < 0) return;
-      let n = parseInt(rec.nyuko_su, 10);
-      if(isNaN(n) || n < 0) n = 0;
-      if(n > rows[idx].qty) n = rows[idx].qty;
-      if(rows[idx].done !== n){ rows[idx].done = n; changed = true; }
-    });
-    if(changed && rebuild && !activeCell) buildBody();
-  }catch(e){ /* 加工記録サーバー未起動時などは静かにスキップ */ }
-}
-// [自動上書き撤去] フォーカス時のdone自動同期を停止（加工記録保存時のみ反映する方針）
-// window.addEventListener('focus', ()=>syncDoneFromKakou());
-
-// ── 起動時: サーバーから nittei.json を取得して rows にマージ ──
-(async function initRows(){
-  try {
-    const resp = await fetch('http://
+    const all = await resp.json
