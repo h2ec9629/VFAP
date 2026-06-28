@@ -33,38 +33,6 @@
     }
     body { display: flex; flex-direction: column; }
 
-    /* ヘッダー */
-    #app-header {
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 14px;
-      height: 44px;
-      background: var(--surface-2);
-      border-bottom: 1px solid var(--border-2);
-      position: relative;
-    }
-    #app-header::after {
-      content: '';
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      height: 2px;
-      background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 60%, transparent 100%);
-    }
-    .header-logo { display: flex; align-items: center; gap: 8px; }
-    .header-logo-mark {
-      width: 24px; height: 24px;
-      background: var(--accent);
-      border-radius: 6px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 11px; font-weight: 800; color: #fff;
-      letter-spacing: -0.5px;
-    }
-    .header-logo-text { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: 0.05em; }
-    .header-logo-sub  { font-size: 10px; color: var(--text-faint); letter-spacing: 0.02em; }
-    #header-date { font-size: 10px; color: var(--text-faint); text-align: right; line-height: 1.4; }
-
     /* タブ */
     #tabs {
       display: flex;
@@ -84,6 +52,12 @@
       letter-spacing: 0.03em;
     }
     .tab-btn.active { color: var(--accent-2); border-bottom-color: var(--accent); }
+    #reload-btn {
+      flex: none; padding: 0 12px;
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--text-faint); font-size: 11px; font-weight: 700;
+      cursor: pointer;
+    }
 
     /* ページ */
     .page { display: none; flex: 1; overflow: hidden; flex-direction: column; }
@@ -129,7 +103,6 @@
     }
     .haiso-section { margin-bottom: 16px; }
 
-    /* 日付ヘッダー 2倍太く */
     .haiso-section-title {
       font-size: 13px;
       font-weight: 900;
@@ -181,23 +154,10 @@
 </head>
 <body>
 
-  <div id="app-header">
-    <div class="header-logo">
-      <div class="header-logo-mark">VF</div>
-      <div>
-        <div class="header-logo-text">VFAP</div>
-        <div class="header-logo-sub">Mobile Viewer</div>
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <div id="header-date"></div>
-      <button onclick="hardReload()" style="font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;border:1px solid var(--border-2);background:var(--surface);color:var(--text-sub);cursor:pointer;white-space:nowrap;">更新</button>
-    </div>
-  </div>
-
   <div id="tabs">
     <button class="tab-btn active" onclick="showTab('gantt')">&#x1F4C5; 日程</button>
     <button class="tab-btn"        onclick="showTab('haiso')">&#x1F69A; 配送</button>
+    <button id="reload-btn"        onclick="hardReload()">更新</button>
   </div>
 
   <div id="page-gantt" class="page active">
@@ -220,20 +180,6 @@ const LW  = 155;
 const h2px   = h => Math.round(h * SC);
 const escH   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const DAYS_JP = ['日','月','火','水','木','金','土'];
-
-(function() {
-  const now = new Date();
-  const dow = DAYS_JP[now.getDay()];
-  const el = document.getElementById('header-date');
-  if (el) {
-    const yy = now.getFullYear();
-    const mm = String(now.getMonth()+1).padStart(2,'0');
-    const dd = String(now.getDate()).padStart(2,'0');
-    const hh = String(now.getHours()).padStart(2,'0');
-    const mi = String(now.getMinutes()).padStart(2,'0');
-    el.innerHTML = yy+'/'+mm+'/'+dd+'('+dow+')<br>'+hh+':'+mi;
-  }
-})();
 
 function showTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b, i) =>
@@ -443,6 +389,24 @@ function renderHaiso(haiso) {
     const isToday = g.date.getTime() === today0.getTime();
     const dateLabel = isToday ? '本日 ' + fmtDate(g.date) : fmtDate(g.date);
     const titleClass = isToday ? 'haiso-section-title today-title' : 'haiso-section-title';
-    /* 列順：納品(ad) → 引取(ac) */
     html += '<div class="haiso-section">';
-    html += 
+    html += '<div class="'+titleClass+'">'+escH(dateLabel)+'</div>';
+    html += '<div class="haiso-cols">';
+    html += '<div><div class="haiso-col-header ad">納品</div>'+itemsHtml(g.ad, 'ad')+'</div>';
+    html += '<div><div class="haiso-col-header ac">引取</div>'+itemsHtml(g.ac, 'ac')+'</div>';
+    html += '</div></div>';
+  });
+
+  wrap.innerHTML = html;
+}
+
+function hardReload() {
+  const url = location.href.split('?')[0] + '?v=' + Date.now();
+  location.replace(url);
+}
+
+loadData();
+</script>
+</body>
+</html>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
