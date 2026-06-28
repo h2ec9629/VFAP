@@ -257,7 +257,11 @@ async function loadData() {
   document.getElementById('gantt-status').style.display = '';
   document.getElementById('gantt-wrap').style.display   = 'none';
   try {
-    const res = await fetch(GIST_API, { headers: { 'Accept': 'application/vnd.github+json' } });
+    const res = await fetch(GIST_API, {
+      headers: { 'Accept': 'application/vnd.github+json' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15000)
+    });
     if (!res.ok) throw new Error('Gist取得失敗 HTTP ' + res.status);
     const gist = await res.json();
     const raw  = gist.files && gist.files['reminder_sync.json'];
@@ -441,5 +445,4 @@ function renderHaiso(haiso) {
     const titleClass = isToday ? 'haiso-section-title today-title' : 'haiso-section-title';
     /* 列順：納品(ad) → 引取(ac) */
     html += '<div class="haiso-section">';
-    html += '<div class="'+titleClass+'">'+escH(dateLabel)+'</div>';
-    html += '<div cl
+    html += 
