@@ -319,7 +319,7 @@
     <div id="k2-summary-body" class="kr-sum-wrap"></div>
   </div>
 
-<div class="kr-scroll" id="k2-record-view">
+  <div class="kr-scroll" id="k2-record-view">
     <div class="kr-main">
 
       <!-- 左カラム：①作業前確認（上）＋③納品後確認（下） -->
@@ -545,6 +545,22 @@ function lookupOndanC(productName, temp) {
   return null;
 }
 
+// 品名に対応する換算表エントリ全件を返す（キー順）
+function _ondanEntriesForProduct(productName) {
+  const nm = _ondanNorm(productName);
+  if (!nm) return [];
+  return Object.keys(ONDAN_FLAT)
+    .filter(k => _ondanNorm(k).startsWith(nm))
+    .map(k => ONDAN_FLAT[k]);
+}
+
+// 品名に対応する換算表のセンター値（中央エントリの換算C）を返す。無ければ null
+function _ondanCenterC(productName) {
+  const entries = _ondanEntriesForProduct(productName);
+  if (!entries.length) return null;
+  return entries[Math.floor((entries.length - 1) / 2)][1];
+}
+
 // 行の温度入力 → 換算セルを更新
 function updateOndanKansan(inputEl) {
   const ri = inputEl?.dataset?.row;
@@ -554,8 +570,13 @@ function updateOndanKansan(inputEl) {
   const nm = document.getElementById('k2-nm-v')?.textContent || '';
   const hasOndo = !!inputEl.value.trim();
   const c = lookupOndanC(nm, inputEl.value);
-  numEl.textContent = (c != null) ? Number(c).toFixed(2) : '';
-  numEl.dataset.val = (c != null) ? c : '';
+  // 温度が空白かつ換算表に登録温度が無い（未入力）場合はセンター値を表示
+  let displayC = c;
+  if (!hasOndo && c == null) {
+    displayC = _ondanCenterC(nm);
+  }
+  numEl.textContent = (displayC != null) ? Number(displayC).toFixed(2) : '';
+  numEl.dataset.val = (displayC != null) ? displayC : '';
   numEl.classList.toggle('kr-ondan-miss', hasOndo && c == null);
   // 温度が未入力なら公差(±)を隠す
   const tolEl = numEl.parentElement?.querySelector('.kr-tol');
@@ -1465,4 +1486,38 @@ function buildSummary(){
     + (prepMin != null ? `<div class="kr-sum-card"><div class="lbl">準備時間</div><div class="val big">${krFmtDur(prepMin)}</div></div>` : '<div class="kr-sum-card"><div class="lbl">準備時間</div><div class="val" style="color:#666">前タスク未完了</div></div>')
     + `<div class="kr-sum-card"><div class="lbl">開始（初品計測）</div><div class="val">${krFmtClock(recs[0].ts)}</div></div>`
     + `<div class="kr-sum-card"><div class="lbl">${doneMs ? '完了' : '最終計測（未完了）'}</div><div class="val">${krFmtClock(doneMs ? _kanryoAt : recs[recs.length-1].ts)}</div></div>`
-    + `<div class="kr-sum-card"><div class="lbl">実所要時間</div><div
+    + `<div class="kr-sum-card"><div class="lbl">実所要時間</div><div class="val big">${krFmtDur(totalMin)}</div></div>`
+    + `<div class="kr-sum-card"><div class="lbl">計測回数</div><div class="val">${recs.length} 回</div></div>`
+    + `<div class="kr-sum-card"><div class="lbl">総加工数</div><div class="val">${totalKakou > 0 ? totalKakou + ' 本' : '—'}</div></div>`
+    + `<div class="kr-sum-card"><div class="lbl">平均加工速度</div><div class="val big">${avgPerMin != null ? avgPerMin + ' 本/分' : '—'}</div></div>`
+    + '</div>';
+
+  // 明細テーブル
+  html += '<table class="kr-sum-tbl"><thead><tr>'
+    + '<th>#</th><th>計測Lot</th><th>計測値</th><th>入力時刻</th><th>前計測からの差数</th><th>加工数</th><th>本/分</th>'
+    + '</tr></thead><tbody>';
+  recs.forEach((r, i) => {
+    const diffMin = i === 0 ? 0 : krWorkMinutes(recs[i-1].ms, r.ms);
+    const diff    = i === 0 ? '—' : krFmtDur(diffMin);
+    const kakouStr = r.kakou != null ? r.kakou : '—';
+    const perMin   = (i > 0 && diffMin > 0 && r.kakou != null)
+      ? (Math.round(r.kakou / diffMin * 10) / 10) + ' 本/分' : '—';
+    const cls  = i === 0 ? ' class="start"' : '';
+    html += `<tr${cls}><td>${i+1}</td><td>${r.lot||'—'}</td><td>${r.val}</td>`
+      + `<td>${krFmtClock(r.ts)}</td><td class="diff">${diff}</td>`
+      + `<td class="diff">${kakouStr}</td><td class="diff">${perMin}</td></tr>`;
+  });
+  if(doneMs){
+    const lastDiff = krFmtDur(krWorkMinutes(recs[recs.length-1].ms, doneMs));
+    html += `<tr class="done"><td>✓</td><td colspan="2">完了</td>`
+      + `<td>${krFmtClock(_kanryoAt)}</td><td class="diff">${lastDiff}</td><td></td><td></td></tr>`;
+  }
+  html += '</tbody></table>';
+
+  html += '<div class="kr-sum-note">'
+    + '※ 差数・本/分は会社の稼働時間 07:55〜17:05 のうち、休憩3本（10:00-10:10・12:20-13:05・15:00-15:10）を除く実稼働時間で算出しています。</div>';
+  body.innerHTML = html;
+}
+</script>
+</body>
+</html>
