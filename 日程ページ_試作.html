@@ -377,7 +377,7 @@
   <span class="sub" id="samedaywork-warn" style="display:none;color:#f0c040;font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
   <div class="btns">
     <button id="sort-due-btn" onclick="sortPicksByDue()" style="display:none;background:#2e9e5b;color:#fff;border-color:#2e9e5b;">⇅ 期限でソート</button>
-    <button onclick="autoAssignDenno()" style="background:#5a3800;color:#c88040;border-color:#c88040;" title="納品日グループごとに伝票Noを自動採番（未採番のみ）">採番</button>
+    <button onclick="autoAssignDenno()" style="background:#5a3800;color:#c88040;border-color:#c88040;" title="月ごとに納品日順で伝票Noを1から振り直す（7件で次のNo）">採番</button>
 <button class="primary" id="save-btn" onclick="saveRows()" style="background:#b86040;color:#fff;border-color:#b86040;">保存</button>
   </div>
 </header>
@@ -1174,81 +1174,52 @@ function toggleDenno(){
 }
 
 // ── 伝票No 自動採番 ──
+// 月ごとに納品日順で 1 から振り直す。同じ納品日は同じ伝票No、7件で次のNoへ。
+// 既存のNoがあっても無視して振り直す（ゴミNo・月跨ぎ混入を一掃するため）。
 // silent=true のときは buildBody/markDirty/toast を呼ばない（commitEdit から呼ぶ時用）
 function autoAssignDenno(silent=false){
-  // 未採番行がなければ終了
-  const unassigned=rows.filter(r=>!r.denno&&r.ad);
-  if(!unassigned.length){
-    if(!silent)toast('未採番の行がありません');
+  // 納品日(ad)を持つ行が対象。ad の無い行の denno は触らない
+  const targets=rows.filter(r=>r.ad);
+  if(!targets.length){
+    if(!silent)toast('採番対象の行がありません');
     return;
   }
 
-  // 月ごとの既存 denno 最大連番を集計（納品日の月を使う）
-  const monthMaxSeq={}; // { 月: maxSeq }
-  rows.forEach(r=>{
-    if(r.denno&&r.ad){
-      const m=parseInt(r.ad.split('/')[0],10);
-      const prefix=m+'-';
-      if(r.denno.startsWith(prefix)){
-        const n=parseInt(r.denno.split('-')[1],10);
-        if(!isNaN(n))monthMaxSeq[m]=Math.max(monthMaxSeq[m]||0,n);
-      }
-    }
-  });
-
-  // 既存の denno 使用数を納品日ごとに集計（空きスロット把握のため）
-  const adDennoCount={}; // { ad: { denno: count } }
-  rows.forEach(r=>{
-    if(r.denno&&r.ad){
-      if(!adDennoCount[r.ad])adDennoCount[r.ad]={};
-      adDennoCount[r.ad][r.denno]=(adDennoCount[r.ad][r.denno]||0)+1;
-    }
-  });
-
-  // 未採番行を納品日でグループ化して日付昇順に処理
-  const groups={};
-  unassigned.forEach(r=>{if(!groups[r.ad])groups[r.ad]=[];groups[r.ad].push(r);});
-  const sortedDates=Object.keys(groups).sort((a,b)=>{
-    const[am,ad]=a.split('/').map(Number);
-    const[bm,bd]=b.split('/').map(Number);
-    return(am*100+ad)-(bm*100+bd);
+  // 月でグループ化（納品日の先頭が月）
+  const byMonth={}; // { 月: [行,...] }
+  targets.forEach(r=>{
+    const m=parseInt(r.ad.split('/')[0],10);
+    if(isNaN(m))return;
+    (byMonth[m]=byMonth[m]||[]).push(r);
   });
 
   let changed=0;
-  sortedDates.forEach(date=>{
-    // 納品日の月を取得してその月の prefix と連番を使う
-    const m=parseInt(date.split('/')[0],10);
+  // 月を昇順に処理。各月は連番 1 から
+  Object.keys(byMonth).map(Number).sort((a,b)=>a-b).forEach(m=>{
     const prefix=m+'-';
-    if(!monthMaxSeq[m])monthMaxSeq[m]=0;
+    // 納品日昇順（同日内は元の並び維持）
+    const grp=byMonth[m].slice().sort((a,b)=>{
+      const[am,ad]=a.ad.split('/').map(Number);
+      const[bm,bd]=b.ad.split('/').map(Number);
+      return(am*100+ad)-(bm*100+bd);
+    });
 
-    const grp=groups[date];
-    const existing=adDennoCount[date]||{};
-
-    // 同じ納品日に既存 denno があれば空きスロット（<7件）を先に使う
-    const sortedExisting=Object.keys(existing).sort((a,b)=>
-      parseInt(a.split('-')[1])-parseInt(b.split('-')[1])
-    );
-    let curDenno=null,curCount=0;
-    for(const d of sortedExisting){
-      if(existing[d]<7){curDenno=d;curCount=existing[d];break;}
-    }
-
+    let seq=0,count=0,cur=null,lastDate=null;
     grp.forEach(r=>{
-      if(!curDenno||curCount>=7){
-        monthMaxSeq[m]++;
-        curDenno=prefix+monthMaxSeq[m];
-        curCount=0;
-        if(!adDennoCount[date])adDennoCount[date]={};
+      // 納品日が変わる or 同日でも7件超で新しい伝票Noへ
+      if(cur===null||lastDate!==r.ad||count>=7){
+        seq++;
+        cur=prefix+seq;
+        count=0;
+        lastDate=r.ad;
       }
-      r.denno=curDenno;
-      if(!adDennoCount[date])adDennoCount[date]={};
-      adDennoCount[date][curDenno]=(adDennoCount[date][curDenno]||0)+1;
-      curCount++;
-      changed++;
+      if(r.denno!==cur)changed++;
+      r.denno=cur;
+      count++;
     });
   });
 
-  if(!silent){buildBody();markDirty();toast(changed+'件に伝票Noを採番しました');}
+  if(!silent){buildBody();markDirty();toast('伝票Noを再採番しました（'+changed+'件変更）');}
 }
 
 function resetOrder(){rows=JSON.parse(JSON.stringify(original));markClean();buildBody();toast("元に戻したで");}
@@ -1811,4 +1782,4 @@ async function syncDoneFromKakou(rebuild=true){
 
 </body>
 </html>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
