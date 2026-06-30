@@ -1378,27 +1378,37 @@ function adToYYMMDD(mmdd){
 }
 function openKiroku(idx) {
   const r = rows[idx];
-  const spec = (VFDB_SPEC && VFDB_SPEC[_normNmP(r.nm)]) || null;
-  // meta は必要なフィールドだけ渡す（URL 長さ節約）
   // 直前タスクのNoを渡す（準備時間算出に使用）
   let prevNo = null;
   for(let pi = idx - 1; pi >= 0; pi--) {
     if(showHidden || !isAutoHide(rows[pi])) { prevNo = rows[pi].no; break; }
   }
   const meta = {no: r.no, nm: r.nm, qty: r.qty, grp: r.grp||'', ad: adToYYMMDD(r.ad), idx: idx, prevNo};
-  const params = new URLSearchParams({
-    meta: JSON.stringify(meta),
-    spec: JSON.stringify(spec)
-  });
-  const url = 'http://localhost:' + KAKOU_PORT + '/ui?' + params.toString();
 
-  if(_kirokuWin && !_kirokuWin.closed) {
-    _kirokuWin.location.href = url;
-    _kirokuWin.focus();
-    return;
+  // ポップアップをユーザー操作コンテキスト内で即座に開く（ブロック回避）
+  let win;
+  if (_kirokuWin && !_kirokuWin.closed) {
+    win = _kirokuWin;
+    win.focus();
+  } else {
+    win = window.open('', 'kirokuWin', 'width=1240,height=820,resizable=yes');
+    if (!win) { toast('ポップアップがブロックされました。ブラウザの設定をご確認ください。'); return; }
+    _kirokuWin = win;
   }
-  _kirokuWin = window.open(url, 'kirokuWin', 'width=1240,height=820,resizable=yes');
-  if(!_kirokuWin){ toast('ポップアップがブロックされました。ブラウザの設定をご確認ください。'); return; }
+
+  // 最新の vfdb_spec をサーバーから取得してから遷移
+  fetch('http://localhost:' + KAKOU_PORT + '/vfdb_spec')
+    .then(res => res.ok ? res.json() : null)
+    .catch(() => null)
+    .then(liveSpec => {
+      const specSrc = (liveSpec && !Array.isArray(liveSpec) && Object.keys(liveSpec).length) ? liveSpec : VFDB_SPEC;
+      const spec = (specSrc && specSrc[_normNmP(r.nm)]) || null;
+      const params = new URLSearchParams({
+        meta: JSON.stringify(meta),
+        spec: JSON.stringify(spec)
+      });
+      win.location.href = 'http://localhost:' + KAKOU_PORT + '/ui?' + params.toString();
+    });
 }
 
 // 加工記録ウィンドウから前後タスクへのナビゲーション
@@ -1807,4 +1817,4 @@ async function syncDoneFromKakou(rebuild=true){
 
 </body>
 </html>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+                                                                                                                                                                                                                                                                          
