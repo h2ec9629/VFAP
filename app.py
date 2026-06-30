@@ -1711,6 +1711,24 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(str(_e).encode())
             return
+        if self.path.split("?")[0] == "/vfdb_spec":
+            try:
+                _spec = build_vfdb_spec_by_name()
+                _body = json.dumps(_spec, ensure_ascii=False).encode("utf-8")
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(_body)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.end_headers()
+                self.wfile.write(_body)
+                self.wfile.flush()
+            except Exception as _e:
+                _eb = str(_e).encode("utf-8")
+                self.send_response(500); self._cors()
+                self.send_header("Content-Length", str(len(_eb)))
+                self.end_headers()
+                self.wfile.write(_eb)
+            return
         with _kakou_lock:
             try:
                 data = json.dumps(_load_all_cases(self.__class__.base_dir),
@@ -4150,29 +4168,4 @@ else:
       }});
     }}
     const obs=new MutationObserver(()=>{{
-      doc.querySelectorAll('iframe').forEach(f=>{{
-        try{{ if(f.contentDocument) applyTo(f.contentDocument); }}catch(e){{}}
-      }});
-    }});
-    obs.observe(doc.body,{{childList:true,subtree:true}});
-  }})();
-}})();
-</script>""", height=0, scrolling=False)
-
-    st.data_editor(
-        df,
-        use_container_width=True,
-        height=650,
-        column_config={
-            "フラグ"      : st.column_config.CheckboxColumn("フラグ", help="チェックで起票フラグON"),
-            "加工時間(h)" : st.column_config.NumberColumn(format="%.1f h"),
-            "単価"        : st.column_config.NumberColumn(format="¥%d"),
-            "数量"        : st.column_config.NumberColumn(format="%d"),
-        },
-        disabled=disabled_cols,
-        hide_index=True,
-        key="order_editor",
-        on_change=_apply_flag_edits,
-    )
-
-st.markdown('<div style="height:50px"></div>', unsafe_allow_html=True)
+      doc.querySelectorAll('iframe').for
