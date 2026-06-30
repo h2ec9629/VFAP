@@ -343,7 +343,8 @@ function buildBillingData(kakouList) {
 
   // nittei 各行を加工
   const result = [];
-  for (const row of NITTEI_ROWS) {
+  for (let _i = 0; _i < NITTEI_ROWS.length; _i++) {
+    const row = NITTEI_ROWS[_i];
     const adStr = row.ad || '';
     if (!adStr) continue;
     const parts = adStr.split('/');
@@ -376,7 +377,7 @@ function buildBillingData(kakouList) {
       no: noDisp, nm: row.nm || '', month,
       shinsokuSu, kakouSu, furyouKei,
       tanka, gyotai, koji,
-      _ad: adStr, denno,
+      _ad: adStr, denno, _idx: _i,
     });
   }
 
@@ -442,12 +443,10 @@ function renderContent() {
     return;
   }
 
-  // 月→納品日→伝票No順でソート
+  // 月でグループ化しつつ、各月の中は日程ページと同じ並び順（NITTEI_ROWSの順）を維持
   const sorted = [...rows].sort((a, b) => {
     if (a.month !== b.month) return a.month - b.month;
-    if (a._ad !== b._ad) return a._ad < b._ad ? -1 : 1;
-    if ((a.denno||'') !== (b.denno||'')) return (a.denno||'') < (b.denno||'') ? -1 : 1;
-    return 0;
+    return a._idx - b._idx;
   });
 
   // rowspan汎用計算
