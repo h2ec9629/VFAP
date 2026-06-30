@@ -3540,6 +3540,23 @@ if save_btn:
                 "no":     str(r.get("指図書No", "")),  # 日程ページからの逆引き用
             }
     ok, err = save_status(new_status)
+    # 納品日（ad）変更があれば nittei.json にも反映
+    _ad_edits = st.session_state.get("_ad_edits", {})
+    if _ad_edits:
+        _np = BASE_DIR / "nittei.json"
+        if not _np.exists():
+            _np = Path(__file__).resolve().parent / "nittei.json"
+        try:
+            _nl = json.loads(_np.read_text(encoding="utf-8")) if _np.exists() else []
+            for _ne in _nl:
+                _no_k = str(_ne.get("no", "")).strip()
+                if _no_k in _ad_edits:
+                    _ne["ad"] = _ad_edits[_no_k]
+            _np.write_text(json.dumps(_nl, ensure_ascii=False, indent=2), encoding="utf-8")
+            st.session_state.pop("_ad_edits", None)
+            st.cache_data.clear()
+        except Exception as _e:
+            st.warning(f"納品日保存エラー: {_e}")
     if ok:
         st.success("ステータスを保存しましたわ！")
     else:
@@ -4002,10 +4019,10 @@ else:
 
     import pandas as pd
     df = pd.DataFrame(rows)
-    editable_cols  = {"フラグ"}
+    editable_cols  = {"フラグ", "納品日"}
     disabled_cols  = [c for c in df.columns if c not in editable_cols]
 
-    # data_editor の on_change: チェックボックス変更を orders に反映
+    # data_editor の on_change: チェックボックス・納品日変更を orders に反映
     st.session_state["_editor_targets"] = filtered
 
     def _apply_flag_edits():
@@ -4020,6 +4037,24 @@ else:
                     targets[pos]["起票FLG"] = bool(cols["フラグ"])
                     new_flag_val = bool(cols["フラグ"])
                     edited_positions.add(int(pos))
+            if "納品日" in cols:
+                if 0 <= pos < len(targets):
+                    _nd = cols["納品日"]
+                    try:
+                        if hasattr(_nd, "strftime"):
+                            _nd_str = _nd.strftime("%m/%d")
+                        elif _nd:
+                            _nd_str = fmt_date(_nd) or str(_nd)
+                        else:
+                            _nd_str = ""
+                    except Exception:
+                        _nd_str = str(_nd) if _nd else ""
+                    targets[pos]["_nittei_ad"] = _nd_str
+                    _no = str(targets[pos].get("指図書No", "")).strip()
+                    if _no:
+                        if "_ad_edits" not in st.session_state:
+                            st.session_state["_ad_edits"] = {}
+                        st.session_state["_ad_edits"][_no] = _nd_str
         # 複数行選択一括適用（JS が URL params _sgt_sel に選択行インデックスを書き込む）
         if new_flag_val is not None:
             try:
@@ -4122,50 +4157,4 @@ else:
           const minR = Math.min(_selStart, _selEnd);
           const maxR = Math.max(_selStart, _selEnd);
           const sel  = Array.from({{length: maxR - minR + 1}}, (_, i) => minR + i);
-          url.searchParams.set('_sgt_sel', sel.join(','));
-        }} else {{
-          url.searchParams.delete('_sgt_sel');
-        }}
-        win.history.replaceState(null, '', url.toString());
-      }}
-    }}
-
-    function onPointerMove(e){{
-      if(!_dragging || e.buttons !== 1) return;
-      const r = rowFromClientY(e.clientY);
-      if(r >= 0) _selEnd = r;
-    }}
-
-    function attachListeners(){{
-      const sc = doc.querySelector('.dvn-scroller');
-      if(sc && !sc._sgtSelOn){{
-        sc._sgtSelOn = true;
-        sc.addEventListener('pointerdown', onPointerDown, {{capture:true}});
-        sc.addEventListener('pointermove', onPointerMove, {{passive:true}});
-        sc.addEventListener('pointerup',   ()=>{{ _dragging=false; }}, {{passive:true}});
-      }}
-    }}
-    const selObs = new MutationObserver(attachListeners);
-    selObs.observe(doc.body, {{childList:true, subtree:true}});
-    [200, 600, 1200].forEach(t=>setTimeout(attachListeners, t));
-  }})();
-
-  // ── 列ホバー（既存） ──
-  (function injectColHL(){{
-    const ORANGE_COL = "rgba(255,140,40,0.13)";
-    function applyTo(root){{
-      root.querySelectorAll('[role="columnheader"]').forEach((th,ci)=>{{
-        th.addEventListener("mouseenter",()=>{{
-          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
-            td.style.background=ORANGE_COL;}});
-          th.style.background=ORANGE_COL;
-        }});
-        th.addEventListener("mouseleave",()=>{{
-          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
-            td.style.background="";}});
-          th.style.background="";
-        }});
-      }});
-    }}
-    const obs=new MutationObserver(()=>{{
-      doc.querySelectorAll('iframe').for
+          url.searchParams.set('_sgt_sel', se
