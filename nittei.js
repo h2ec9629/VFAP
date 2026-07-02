@@ -1308,7 +1308,11 @@ document.addEventListener('keydown', function(e) {
 });
 // 加工記録ページの③入庫数と進捗(done)を連動させる
 async function syncDoneFromKakou(rebuild=true){
+  // 注: doneの自動上書きは撤去済み(手入力が消えるため)。呼び出し箇所なし・現状no-op。
+  // kanryo=true時のdone反映はapp.py側(_KakouHandler)で行う。
   try{
-    const resp = await fetch('http://localhost:'+KAKOU_PORT+'/', {cache:'no-store'});
+    const resp = await fetch('http://'+KAKOU_PORT+'/', {cache:'no-store'});
     if(!resp.ok) return;
-    const all = await resp.json
+    await resp.json();
+  }catch(e){ /* noop */ }
+}

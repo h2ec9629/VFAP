@@ -4261,4 +4261,125 @@ else:
   rowObs.observe(doc.body, {{childList:true, subtree:true}});
   [100, 400, 900].forEach(t => setTimeout(applyRowHL, t));
 
-  // ── 複数行選択 → URL 
+  // ── 複数行選択 → URL params 書き込み（一括チェック用） ──
+  // aria-selected が使えないためマウスドラッグ start/end を自前追跡
+  (function(){{
+    const win = window.parent;
+    let _selStart = -1, _selEnd = -1, _dragging = false;
+
+    // クライアントY → 0ベース行インデックス
+    function rowFromClientY(clientY){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(!sc) return -1;
+      const rows = sc.querySelectorAll('[role="row"]');
+      const scRect = sc.getBoundingClientRect();
+      const relY = clientY - scRect.top;
+      const scrolledY = relY + sc.scrollTop;
+      let headerH = 35, rowH = 35;
+      if(rows.length >= 1) headerH = rows[0].getBoundingClientRect().height || 35;
+      if(rows.length >= 2) rowH   = rows[1].getBoundingClientRect().height || 35;
+      if(scrolledY < headerH) return -1;
+      return Math.floor((scrolledY - headerH) / rowH);
+    }}
+
+    // フラグ列（第1列）の幅: gridcell で取れなければ固定値
+    function getFirstColWidth(){{
+      const cell = doc.querySelector('.dvn-scroller [role="gridcell"][aria-colindex="1"]');
+      return cell ? cell.offsetWidth : 55;
+    }}
+
+    function onPointerDown(e){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(!sc) return;
+      const rect = sc.getBoundingClientRect();
+      const relX = e.clientX - rect.left;
+      const row  = rowFromClientY(e.clientY);
+
+      if(relX >= getFirstColWidth()){{
+        // フラグ列以外 → 選択ドラッグ開始として記録
+        _dragging = true;
+        _selStart = row;
+        _selEnd   = row;
+        const url = new URL(win.location.href);
+        url.searchParams.delete('_sgt_sel');
+        win.history.replaceState(null, '', url.toString());
+      }} else {{
+        // フラグ列クリック → 記録済み選択範囲で一括適用
+        _dragging = false;
+        const url = new URL(win.location.href);
+        if(_selStart >= 0 && _selEnd >= 0 && _selStart !== _selEnd){{
+          const minR = Math.min(_selStart, _selEnd);
+          const maxR = Math.max(_selStart, _selEnd);
+          const sel  = Array.from({{length: maxR - minR + 1}}, (_, i) => minR + i);
+          url.searchParams.set('_sgt_sel', sel.join(','));
+        }} else {{
+          url.searchParams.delete('_sgt_sel');
+        }}
+        win.history.replaceState(null, '', url.toString());
+      }}
+    }}
+
+    function onPointerMove(e){{
+      if(!_dragging || e.buttons !== 1) return;
+      const r = rowFromClientY(e.clientY);
+      if(r >= 0) _selEnd = r;
+    }}
+
+    function attachListeners(){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(sc && !sc._sgtSelOn){{
+        sc._sgtSelOn = true;
+        sc.addEventListener('pointerdown', onPointerDown, {{capture:true}});
+        sc.addEventListener('pointermove', onPointerMove, {{passive:true}});
+        sc.addEventListener('pointerup',   ()=>{{ _dragging=false; }}, {{passive:true}});
+      }}
+    }}
+    const selObs = new MutationObserver(attachListeners);
+    selObs.observe(doc.body, {{childList:true, subtree:true}});
+    [200, 600, 1200].forEach(t=>setTimeout(attachListeners, t));
+  }})();
+
+  // ── 列ホバー（既存） ──
+  (function injectColHL(){{
+    const ORANGE_COL = "rgba(255,140,40,0.13)";
+    function applyTo(root){{
+      root.querySelectorAll('[role="columnheader"]').forEach((th,ci)=>{{
+        th.addEventListener("mouseenter",()=>{{
+          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
+            td.style.background=ORANGE_COL;}});
+          th.style.background=ORANGE_COL;
+        }});
+        th.addEventListener("mouseleave",()=>{{
+          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
+            td.style.background="";}});
+          th.style.background="";
+        }});
+      }});
+    }}
+    const obs=new MutationObserver(()=>{{
+      doc.querySelectorAll('iframe').forEach(f=>{{
+        try{{ if(f.contentDocument) applyTo(f.contentDocument); }}catch(e){{}}
+      }});
+    }});
+    obs.observe(doc.body,{{childList:true,subtree:true}});
+  }})();
+}})();
+</script>""", height=0, scrolling=False)
+
+    st.data_editor(
+        df,
+        use_container_width=True,
+        height=650,
+        column_config={
+            "フラグ"      : st.column_config.CheckboxColumn("フラグ", help="チェックで起票フラグON"),
+            "加工時間(h)" : st.column_config.NumberColumn(format="%.1f h"),
+            "単価"        : st.column_config.NumberColumn(format="¥%d"),
+            "数量"        : st.column_config.NumberColumn(format="%d"),
+        },
+        disabled=disabled_cols,
+        hide_index=True,
+        key="order_editor",
+        on_change=_apply_flag_edits,
+    )
+
+st.markdown('<div style="height:50px"></div>', unsafe_allow_html=True)

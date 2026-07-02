@@ -19,13 +19,8 @@ from pathlib import Path
 # ════════════════════════════════════════════════════════════
 # ★ここだけ自分の環境に合わせて書き換える★
 # ════════════════════════════════════════════════════════════
-<<<<<<< HEAD
 SRC_DIR = Path(__file__).resolve().parent / "input" / "樹脂指示書"                 # コピー元（直下のxlsxが対象）
 DST_DIR = Path(__file__).resolve().parent / "樹脂指示書_クリーン"                   # クリーン版の保管先（無ければ自動作成）
-=======
-SRC_DIR = Path(r"C:\Users\mmtm9\OneDrive\work\SGT_cloud\input\樹脂指示書")        # コピー元（直下のxlsxが対象）
-DST_DIR = Path(r"C:\Users\mmtm9\OneDrive\work\VFAP\樹脂指示書_クリーン")           # クリーン版の保管先（無ければ自動作成）
->>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 # ════════════════════════════════════════════════════════════
 
 
