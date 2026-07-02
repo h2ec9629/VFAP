@@ -38,3 +38,10 @@ Thumbs.db
 desktop.ini
 >>>>>>> 3de6de60ae8233f443224245ac3532ff81df1986
 token/
+
+# 手動バックアップ系は追跡除外（2026-07-02?）
+*.bak
+*.bak_*
+*.before_*
+*.restored_head
+*_backup.html
