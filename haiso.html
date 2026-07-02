@@ -29,6 +29,8 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   .ctrl button:hover{background:#3a3a3a;}
   .btn-pdf{background:#e86a00!important;color:#fff!important;border-color:#e86a00!important;font-weight:700;}
   .btn-pdf:hover{background:#c55a00!important;}
+  .btn-save{background:#2e9e5b!important;color:#fff!important;border-color:#2e9e5b!important;font-weight:700;}
+  .btn-save:hover{background:#24824a!important;}
   .week-lbl{font-size:13px;color:#888;margin-left:4px;}
   .page-wrap{padding:12px;}
   .page-title{font-size:14px;font-weight:700;text-align:center;margin-bottom:4px;color:#e0e0e0;}
@@ -148,6 +150,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   <button onclick="setThisWeek()">今週</button>
   <span class="week-lbl" id="week-lbl"></span>
   <button class="btn-pdf" onclick="window.print()">🖨 PDF出力</button>
+  <button class="btn-save" id="btn-save-state" onclick="saveHaisoState()">💾 保存</button>
 </div>
 <div class="page-wrap">
   <div class="hero">
@@ -183,10 +186,10 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
         <table>
           <thead><tr><th>資材名</th><th style="width:50px;">数量</th><th style="width:70px;">支給希望日</th></tr></thead>
           <tbody id="sono-ta-tb">
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
-            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
           </tbody>
         </table>
       </div>
@@ -375,7 +378,11 @@ function render(){
           const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
           if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
           tr.appendChild(hakTd);
-          const shosuTd=mkTd(String(pick.shosu),'r');
+          const shosuTd=mkTd(String(pick.shosu),'r pick-qty');
+          shosuTd.contentEditable='true';
+          shosuTd.dataset.day=key;
+          shosuTd.dataset.hako=pick.hakoNm;
+          shosuTd.addEventListener('input',function(){shosuTd.classList.add('edited');});
           if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
           tr.appendChild(shosuTd);
         }
@@ -392,7 +399,76 @@ function render(){
     }
   }
 
+  loadHaisoState(monVal);
 }
+
+// ── 入力状態の保存/読込（支給数・支給依頼・備考をJSONでOneDrive側に保管）──
+const HAISO_API='http://localhost:8503';
+
+function collectHaisoState(){
+  const shosu={};
+  document.querySelectorAll('#left-tb td.pick-qty[data-day]').forEach(function(td){
+    const k=td.dataset.day+'|'+td.dataset.hako;
+    shosu[k]=td.textContent.trim();
+  });
+  const sono=[];
+  document.querySelectorAll('#sono-ta-tb tr').forEach(function(tr){
+    const sel=tr.querySelector('.kyoyu-sel');
+    const qty=tr.querySelector('.sono-qty');
+    const dt=tr.querySelector('.sono-dt');
+    sono.push({sel:sel?sel.value:'',qty:qty?qty.textContent.trim():'',dt:dt?dt.textContent.trim():''});
+  });
+  const bikoEl=document.querySelector('.biko');
+  const biko=bikoEl?bikoEl.textContent.trim():'';
+  return {shosu,sono,biko};
+}
+
+function loadHaisoState(weekKey){
+  if(!weekKey)return;
+  fetch(HAISO_API+'/haiso_state?week='+encodeURIComponent(weekKey))
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(st){
+      if(!st||!st.ok)return;
+      const d=st.data||{};
+      if(d.shosu){
+        document.querySelectorAll('#left-tb td.pick-qty[data-day]').forEach(function(td){
+          const k=td.dataset.day+'|'+td.dataset.hako;
+          if(Object.prototype.hasOwnProperty.call(d.shosu,k)){
+            td.textContent=d.shosu[k];
+            td.classList.add('edited');
+          }
+        });
+      }
+      if(Array.isArray(d.sono)){
+        const rows=document.querySelectorAll('#sono-ta-tb tr');
+        d.sono.forEach(function(row,i){
+          const tr=rows[i]; if(!tr)return;
+          const sel=tr.querySelector('.kyoyu-sel'); if(sel&&row.sel!=null)sel.value=row.sel;
+          const qty=tr.querySelector('.sono-qty'); if(qty&&row.qty!=null)qty.textContent=row.qty;
+          const dt=tr.querySelector('.sono-dt'); if(dt&&row.dt!=null)dt.textContent=row.dt;
+        });
+      }
+      if(typeof d.biko==='string'){
+        const b=document.querySelector('.biko'); if(b)b.textContent=d.biko;
+      }
+    })
+    .catch(function(){/* サーバー未起動（単体プレビュー等）は無視 */});
+}
+
+function saveHaisoState(){
+  const weekKey=document.getElementById('week-start').value;
+  if(!weekKey){alert('週が表示されてません');return;}
+  const btn=document.getElementById('btn-save-state');
+  const old=btn.textContent; btn.disabled=true; btn.textContent='保存中…';
+  fetch(HAISO_API+'/save_haiso_state',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({week:weekKey,data:collectHaisoState()})})
+    .then(function(r){return r.json();})
+    .then(function(j){btn.textContent=j.ok?'✓ 保存しました':'✗ '+(j.msg||'失敗');})
+    .catch(function(){btn.textContent='✗ 通信失敗';})
+    .then(function(){setTimeout(function(){btn.textContent=old;btn.disabled=false;},2600);});
+}
+
 document.addEventListener('DOMContentLoaded', setThisWeek);
 </script>
-</bod
+</body>
+</html>

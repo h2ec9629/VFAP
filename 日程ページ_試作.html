@@ -70,7 +70,7 @@
   .fld.qty:hover{filter:brightness(1.3);}
   .fld.qty .phour{font-size:11px;color:var(--sub);}
   .fld.mod-qty{background:#332800 !important;}
-  .dchip.due.mod-af{background:#2d0040 !important;color:#cc88ff !important;}
+  .dchip.due.mod-af{color:#cc88ff !important;}
   .fld.done{flex:0 0 48px;text-align:right;cursor:pointer;font-weight:700;font-size:16px;}
   .fld.done small{font-size:11px;color:var(--sub);font-weight:400;}
   .fld.done.full{background:#003a1a;}
@@ -79,12 +79,16 @@
   .fld.hrs .cum{font-size:11px;color:var(--proc1);}
   .dchip{cursor:pointer;text-align:center;flex:0 0 54px;}
   .dchip:hover{filter:brightness(1.4);}
-  .dchip.mat{background:#2a2500;color:#f3d518;}
-  .dchip.deliv{background:#002a15;color:#2e9e5b;}
-  .dchip.due{background:#2a0000;color:#d23b3b;}
+  .dchip.mat{color:#f3d518;}
+  .dchip.deliv{color:#2e9e5b;}
+  .dchip.due{color:#d23b3b;}
   td.cell{min-width:var(--cell-w);width:var(--cell-w);height:var(--row-h);border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;position:relative;z-index:0;}
   td.cell.half{border-right:1px solid #2a2a2a;}
   td.cell.dayend{border-right:2px solid #444;}
+  /* 週末（金曜終わり）の右側縦罫線を強調 */
+  td.cell.wknd-end{border-right:2px solid var(--accent) !important;}
+  th.day.wknd-end{border-right:2px solid var(--accent) !important;}
+  #head2 th.wknd-end{border-right:2px solid var(--accent) !important;}
   .bar{position:absolute;top:var(--bar-top);height:var(--bar-h);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;overflow:hidden;z-index:3;}
   .mark{position:absolute;top:var(--bar-top);height:var(--bar-h);border-radius:3px;opacity:.85;z-index:3;}
   .mark.mat{background:var(--mat);}
@@ -372,7 +376,7 @@
 </head>
 <body class="hide-kss hide-denno">
 <header>
-  <h1>6月度 切断加工日程表</h1>
+  <h1 id="page-title">6月度 切断加工日程表</h1>
   <span class="sub" id="deliv-warn" style="display:none;color:var(--due);font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
   <span class="sub" id="samedaywork-warn" style="display:none;color:#f0c040;font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
   <div class="btns">
@@ -425,6 +429,22 @@
 // 日付軸。各日2マス＝4hずつ。目盛りは累計h（4の倍数）で表示
 const days=[["06/04","木"],["06/05","金"],["06/08","月"],["06/09","火"],["06/10","水"],["06/11","木"],["06/12","金"],["06/15","月"],["06/16","火"],["06/17","水"],["06/18","木"],["06/19","金"],["06/22","月"]];
 const SLOTS=days.length*2, CW=30, HRS_PER_SLOT=4;
+// 週末判定：曜日ラベルではなく実際の日付の連続性で判定（金曜が祝日で配列から抜けてても対応）
+const dayGap=(()=>{
+  const out=new Array(days.length).fill(false);
+  const dates=[];
+  let year=new Date().getFullYear(),prevDate=null;
+  for(const d of days){
+    const [mm,dd]=d[0].split('/').map(Number);
+    let dt=new Date(year,mm-1,dd);
+    if(prevDate && dt<=prevDate){ year++; dt=new Date(year,mm-1,dd); }
+    dates.push(dt); prevDate=dt;
+  }
+  for(let i=0;i<dates.length-1;i++){
+    if(Math.round((dates[i+1]-dates[i])/86400000)>1) out[i]=true;
+  }
+  return out;
+})();
 // COL_OFFSET は getColOffset() に移行（シミュ連動のため）
 function slot(d,h){return d*2+h;}
 function dateToSlot(mmdd,half){if(!mmdd)return null;const i=days.findIndex(d=>d[0]===mmdd);return i<0?null:slot(i,half||0);}
@@ -513,11 +533,12 @@ function buildHead(){
   let h1=`<th class="corner" rowspan="2"></th>`,h2="";
   let cum=0;
   days.forEach((d,i)=>{
-    h1+=`<th class="day" colspan="2">${d[0]}<small>(${d[1]})</small></th>`;
+    const isWk=dayGap[i]; // 翌営業日との間に空き（土日・祝日）がある日の右側罫線を強調
+    h1+=`<th class="day${isWk?' wknd-end':''}" colspan="2">${d[0]}<small>(${d[1]})</small></th>`;
     // 1日2マス＝累計4の倍数の目盛り（getColOffsetで午前/午後/シミュ切替）
     const CO=getColOffset();
     const a=cum+CO; cum+=HRS_PER_SLOT; const b=cum+CO; cum+=HRS_PER_SLOT;
-    h2+=`<th>${a}</th><th>${b}</th>`;
+    h2+=`<th>${a}</th><th${isWk?' class="wknd-end"':''}>${b}</th>`;
   });
   document.getElementById('head1').innerHTML=h1;
   document.getElementById('head2').innerHTML=h2;
@@ -564,6 +585,7 @@ function buildBody(){
   const tb=document.getElementById('body');tb.innerHTML="";
   const BAR_OFFSET=getSimOffset(); // バー表示位置（シミュトグル連動）
   let cumH=0; // 累計工数は常に0から（表示される「累X.Xh」の基準）
+  let parallelActive=false; // 並行開始日行が一度出たら、以降の行も+4h/+8hトグルの影響を受けない
   let delivRiskCount=0; // 納品日を追い越す件数（遅延の恐れ・赤）
   let sameDayCount=0;   // 納品日当日に食い込む件数（当日まで作業・黄）
   let prevZansu=null; // 8FL281304行の残数累積
@@ -578,8 +600,9 @@ function buildBody(){
     // 並行タスク：parallelFromが設定されている場合は日付から開始位置を計算
     let startH, endH;
     if(r.parallelFrom){
+      parallelActive=true; // 以降の行も含めてトグル非連動にする
       const _pi=days.findIndex(d=>d[0]===r.parallelFrom);
-      // parallelFrom 行も +4h/+8h シミュ連動でバーをずらす（-BAR_OFFSET 除去）
+      // parallelFrom 行は明示的に設定した日付＝絶対位置。+4h/+8hシミュの影響は受けない
       startH=(_pi>=0)?(_pi*8):cumH;
       endH=startH+remaining;
       cumH=endH;
@@ -633,7 +656,8 @@ function buildBody(){
     </div></td>`;
     for(let s=0;s<SLOTS;s++){
       const de=(s%2===1)?' dayend':' half';
-            cells+=`<td class="cell${de}" data-s="${s}"></td>`;
+      const isWk=(s%2===1) && dayGap[s>>1]; // 翌営業日との間に空き（土日・祝日）がある日の右側罫線を強調
+      cells+=`<td class="cell${de}${isWk?' wknd-end':''}" data-s="${s}"></td>`;
     }
     tr.innerHTML=cells;tb.appendChild(tr);
     const fc=tr.querySelectorAll('td.cell')[0];
@@ -641,7 +665,8 @@ function buildBody(){
     if(!pct100){
       const pxPerH=CW/HRS_PER_SLOT;
       const bar=document.createElement('div');bar.className="bar";
-      bar.style.left=((startH+BAR_OFFSET)*pxPerH+1)+"px";
+      const _barOff=parallelActive?0:BAR_OFFSET; // 並行開始日行以降は+4h/+8hトグルの影響を受けない（明示的に設定した日付を固定）
+      bar.style.left=((startH+_barOff)*pxPerH+1)+"px";
       bar.style.width=Math.max(remaining*pxPerH-2,4)+"px";
       bar.style.background=r.nm.includes('灯具')?"var(--proc1)":"var(--proc2)"; // 灯具=一人(水色)、それ以外=二人(グレー)
       fc.appendChild(bar);
@@ -677,7 +702,7 @@ function buildBody(){
     const _di=days.findIndex(d=>d[0]===r.ad);
     if(!pct100 && _di>=0){
       const HPD=HRS_PER_SLOT*2;             // 1営業日の工数(8h)
-      const visEndH=endH+BAR_OFFSET;        // 画面上のバー終端
+      const visEndH=endH+(parallelActive?0:BAR_OFFSET); // 画面上のバー終端（並行開始日行以降はトグル非連動）
       const amStart=_di*HPD;                // 納品日 午前枠の始まり
       const pmStart=_di*HPD+HRS_PER_SLOT;   // 納品日 午後枠の始まり
       if(visEndH > pmStart){
@@ -767,6 +792,9 @@ function setDelivFilterToday(){
   applyDelivFilter();
 }
 document.addEventListener('DOMContentLoaded',()=>{
+  // ヘッダーの「〇月度」を当月で自動表示
+  const titleEl=document.getElementById('page-title');
+  if(titleEl) titleEl.textContent=(new Date().getMonth()+1)+'月度 切断加工日程表';
   const wrapEl=document.querySelector('.wrap');
   if(wrapEl){
     wrapEl.addEventListener('pointerdown',()=>wrapEl.classList.add('no-select'));
@@ -1626,6 +1654,17 @@ function showParallelMenu(x,y,idx){
   bn.addEventListener('click',()=>{ doBunno(idx); closeParallelMenu(); });
   menu.appendChild(bn);
   const bsep=document.createElement('div');bsep.className='ctx-sep';menu.appendChild(bsep);
+  if(r.parallelFrom){
+    const clr=document.createElement('div');clr.className='ctx-clear';clr.textContent='並行設定をクリア';
+    clr.addEventListener('click',()=>{
+      delete rows[idx].parallelFrom;
+      buildBody();markDirty();
+      toast('並行設定をクリア');
+      closeParallelMenu();
+    });
+    menu.appendChild(clr);
+    const csep=document.createElement('div');csep.className='ctx-sep';menu.appendChild(csep);
+  }
   const title=document.createElement('div');
   title.className='ctx-title';title.textContent='並行開始日を設定';
   menu.appendChild(title);
@@ -1641,17 +1680,6 @@ function showParallelMenu(x,y,idx){
     });
     menu.appendChild(item);
   });
-  if(r.parallelFrom){
-    const sep=document.createElement('div');sep.className='ctx-sep';menu.appendChild(sep);
-    const clr=document.createElement('div');clr.className='ctx-clear';clr.textContent='並行設定をクリア';
-    clr.addEventListener('click',()=>{
-      delete rows[idx].parallelFrom;
-      buildBody();markDirty();
-      toast('並行設定をクリア');
-      closeParallelMenu();
-    });
-    menu.appendChild(clr);
-  }
   document.body.appendChild(menu);_ctxMenu=menu;
   setTimeout(()=>document.addEventListener('click',closeParallelMenu,{once:true}),0);
 }
@@ -1782,4 +1810,4 @@ async function syncDoneFromKakou(rebuild=true){
 
 </body>
 </html>
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       

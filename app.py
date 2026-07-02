@@ -1270,6 +1270,11 @@ CHOHYO_DIRS = {
 }
 CHOHYO_BY_YEAR_ONLY = {"請求明細書"}
 
+# ── 配送ページ（haiso.html）の入力状態保存（支給数・支給依頼・備考）──
+#    週(week-start)ごとにJSONで保管。BASE_DIR直下＝OneDriveのSGT_cloud等クラウド同期フォルダ。
+HAISO_STATE_PATH = BASE_DIR / "haiso_state.json"
+_haiso_state_lock = threading.Lock()
+
 # ══════════════════════════════
 # 残4: 日次zipバックアップ ＋ PC別JSONLログ
 # ══════════════════════════════
@@ -1369,6 +1374,13 @@ _CHOHYO_INJECT_HAISO = r"""
       var dt=new Date(d+'T00:00:00'); var mon=new Date(dt);
       mon.setDate(mon.getDate()-((mon.getDay()+6)%7));
       var y=mon.getFullYear(), m=('0'+(mon.getMonth()+1)).slice(-2), dd=('0'+mon.getDate()).slice(-2);
+      // ── select（資材名）は選択状態がcloneNodeで失われるため、選択中のoptionへ
+      //    selected属性を明示的に焼き込んでからクローンする ──
+      document.querySelectorAll('.kyoyu-sel').forEach(function(s){
+        Array.prototype.forEach.call(s.options,function(o){o.removeAttribute('selected');});
+        var opt=s.options[s.selectedIndex];
+        if(opt)opt.setAttribute('selected','selected');
+      });
       var clone=document.documentElement.cloneNode(true);
       clone.querySelectorAll('script').forEach(function(s){s.remove();});
       var old=b.textContent; b.disabled=true; b.textContent='保存中…';
@@ -1729,6 +1741,32 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(_eb)
             return
+        if self.path.split("?")[0] == "/haiso_state":
+            try:
+                from urllib.parse import urlparse as _up3, parse_qs as _pq3
+                _qp3 = _pq3(_up3(self.path).query)
+                _week = (_qp3.get("week", [""])[0])
+                with _haiso_state_lock:
+                    _all = {}
+                    if HAISO_STATE_PATH.exists():
+                        try:
+                            _all = json.loads(HAISO_STATE_PATH.read_text(encoding="utf-8"))
+                        except Exception:
+                            _all = {}
+                _body = json.dumps(
+                    {"ok": True, "data": _all.get(_week, {})},
+                    ensure_ascii=False).encode("utf-8")
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(_body)))
+                self.end_headers()
+                self.wfile.write(_body)
+            except Exception as _e:
+                _eb = json.dumps({"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8")
+                self.send_response(500); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(_eb)
+            return
         with _kakou_lock:
             try:
                 data = json.dumps(_load_all_cases(self.__class__.base_dir),
@@ -1745,47 +1783,57 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 _len = int(self.headers.get("Content-Length", 0))
                 _pl  = json.loads(self.rfile.read(_len))
                 _changes = _pl.get("changes", [])   # [{ri, ci, value}, ...]
-                _db_path = Path(__file__).resolve().parent / "db_table.html"
-                if not _db_path.exists():
-                    raise FileNotFoundError("db_table.html not found")
-                _html = _db_path.read_text(encoding="utf-8")
-                # ── const R = [...]; を抽出してパース ──
-                import re as _re_db
-                _m = _re_db.search(r'const R = (\[[\s\S]*?\]);', _html)
-                if not _m:
-                    raise ValueError("const R not found in db_table.html")
-                _r_str = _m.group(1)
-                _rows = json.loads(_r_str)
+                # ── vfdb.json を直接の保存先にする（db_table.html はもう保持しない）──
+                _vfdb_path = resolve_vfdb_write_path()
+                if not _vfdb_path.exists():
+                    raise FileNotFoundError(f"vfdb.json not found: {_vfdb_path}")
+                _recs = json.loads(_vfdb_path.read_text(encoding="utf-8"))
+                if not _recs:
+                    raise ValueError("vfdb.json が空です")
+                _cols = list(_recs[0].keys())
                 # ── 変更を適用 ──
                 for ch in _changes:
                     ri, ci, val = int(ch["ri"]), int(ch["ci"]), str(ch["value"])
-                    if 0 <= ri < len(_rows) and 0 <= ci < len(_rows[ri]):
-                        _rows[ri][ci] = val
-                # ── HTMLを書き戻す ──
-                _new_r = "const R = " + json.dumps(_rows, ensure_ascii=False) + ";"
-                _html = _re_db.sub(r'const R = \[[\s\S]*?\];', _new_r, _html, count=1)
-                _db_path.write_text(_html, encoding="utf-8")
-                # ── vfdb.json を const C + const R から再構築（存在しなければ新規作成）──
-                _vfdb_path = Path(__file__).resolve().parent / "vfdb.json"
-                try:
-                    _m2 = _re_db.search(r'const C = (\[[\s\S]*?\]);', _html)
-                    if _m2:
-                        _cols = json.loads(_m2.group(1))
-                        # 全行を dict に変換して list として書き出す
-                        _vfdb_new = []
-                        for row in _rows:
-                            d = {_cols[i]: row[i] for i in range(min(len(_cols), len(row)))}
-                            _vfdb_new.append(d)
-                        _vfdb_path.write_text(
-                            json.dumps(_vfdb_new, ensure_ascii=False, indent=2),
-                            encoding="utf-8")
-                except Exception:
-                    pass  # vfdb.json 書き込み失敗は無視（db_table.html は正常保存済み）
+                    if 0 <= ri < len(_recs) and 0 <= ci < len(_cols):
+                        _recs[ri][_cols[ci]] = val
+                _vfdb_path.write_text(
+                    json.dumps(_recs, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
                 self.send_response(200); self._cors()
                 self.send_header("Content-Type", "application/json"); self.end_headers()
                 self.wfile.write(json.dumps(
                     {"ok": True, "saved": len(_changes)},
                     ensure_ascii=False).encode("utf-8"))
+            except Exception as _e:
+                self.send_response(500); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps(
+                    {"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8"))
+            return
+        # ── 配送ページ：支給数/支給依頼/備考の入力状態を週ごとにJSON保存 ──
+        if self.path.split("?")[0] == "/save_haiso_state":
+            try:
+                _len = int(self.headers.get("Content-Length", 0))
+                _pl  = json.loads(self.rfile.read(_len))
+                _week = str(_pl.get("week") or "").strip()
+                _data = _pl.get("data") or {}
+                if not _week:
+                    raise ValueError("week is required")
+                with _haiso_state_lock:
+                    _all = {}
+                    if HAISO_STATE_PATH.exists():
+                        try:
+                            _all = json.loads(HAISO_STATE_PATH.read_text(encoding="utf-8"))
+                        except Exception:
+                            _all = {}
+                    _all[_week] = _data
+                    _tmp = HAISO_STATE_PATH.with_suffix(".json.tmp")
+                    _tmp.write_text(
+                        json.dumps(_all, ensure_ascii=False, indent=2), encoding="utf-8")
+                    os.replace(str(_tmp), str(HAISO_STATE_PATH))
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
             except Exception as _e:
                 self.send_response(500); self._cors()
                 self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -2125,19 +2173,42 @@ def save_deleted_keys(keys: set):
         pass
 
 # ══════════════════════════════════════════════════════════
+# vfdb.json の実ファイル位置を解決（読み込み・保存すべてここを通す）
+# ══════════════════════════════════════════════════════════
+def _vfdb_candidates() -> list:
+    """vfdb.json の探索候補（優先順）。
+    1. BASE_DIR（OneDrive\\work\\VFAP-cloud / SGT_cloud 等のクラウド同期フォルダが
+       存在すれば最優先でそこになる。無ければ app.py と同じフォルダ）
+    2. OneDrive\\work\\VFAP
+    3. app.py と同じフォルダ
+    """
+    _up = os.environ.get("USERPROFILE", "")
+    return [
+        BASE_DIR / "vfdb.json",
+        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up else []),
+        Path(__file__).resolve().parent / "vfdb.json",
+    ]
+
+
+def resolve_vfdb_path():
+    """既存の vfdb.json を優先順位で探して返す。どこにも無ければ None（読み込み専用）。"""
+    return next((p for p in _vfdb_candidates() if p.exists()), None)
+
+
+def resolve_vfdb_write_path() -> Path:
+    """保存先パス。既存ファイルがあればそこへ上書き、無ければ BASE_DIR 直下を新規作成先にする。
+    （BASE_DIR が OneDrive\\work\\SGT_cloud 等を指していれば、そこが新規作成先になる）"""
+    existing = resolve_vfdb_path()
+    return existing if existing is not None else _vfdb_candidates()[0]
+
+
+# ══════════════════════════════════════════════════════════
 # VFDB2 読み込み（5分キャッシュ）
 # ══════════════════════════════════════════════════════════
 @st.cache_data(ttl=300, show_spinner="VFDB2 読み込み中...")
 def load_vfdb() -> dict:
     """vfdb.json を読んで 品目コード→属性dict のマップを返す（SGT不要）"""
-    # BASE_DIR が SGT_cloud 等を向いていても見つかるよう複数箇所を試す
-    _up = os.environ.get("USERPROFILE", "")
-    candidates = [
-        BASE_DIR / "vfdb.json",
-        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up else []),
-        Path(__file__).resolve().parent / "vfdb.json",
-    ]
-    vfdb_json = next((p for p in candidates if p.exists()), None)
+    vfdb_json = resolve_vfdb_path()
     if vfdb_json is None:
         return {}
     try:
@@ -2173,13 +2244,7 @@ def load_vfdb() -> dict:
 def build_vfdb_spec_by_name() -> dict:
     """vfdb.json を 品名(空白除去)→品目スペック dict に整形（加工記録モーダル左パネル用）"""
     import re as _re2, unicodedata as _ud
-    _up2 = os.environ.get("USERPROFILE", "")
-    candidates = [
-        BASE_DIR / "vfdb.json",
-        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up2 else []),
-        Path(__file__).resolve().parent / "vfdb.json",
-    ]
-    p = next((c for c in candidates if c.exists()), None)
+    p = resolve_vfdb_path()
     if p is None:
         return {}
     try:
@@ -2873,6 +2938,23 @@ if page_sel == "データベース":
     st.markdown("## データベース")
 
     _db_html = (Path(__file__).resolve().parent / "db_table.html").read_text(encoding="utf-8")
+    # ── vfdb.json を毎回読み直して const C / const R に差し込む（vfdb.json が唯一の保存先）──
+    import re as _re_dbpage
+    try:
+        _vfdb_path_dbpage = resolve_vfdb_path()
+        _recs_dbpage = json.loads(_vfdb_path_dbpage.read_text(encoding="utf-8")) if _vfdb_path_dbpage else []
+        if _recs_dbpage:
+            _cols_dbpage = list(_recs_dbpage[0].keys())
+            _rows_dbpage = [[str(rec.get(c, "")) for c in _cols_dbpage] for rec in _recs_dbpage]
+            _c_js = json.dumps(_cols_dbpage, ensure_ascii=False)
+            _r_js = json.dumps(_rows_dbpage, ensure_ascii=False)
+            _db_html = _re_dbpage.sub(r'const C = \[[\s\S]*?\];', "const C = " + _c_js + ";", _db_html, count=1)
+            _db_html = _re_dbpage.sub(r'const R = \[[\s\S]*?\];', "const R = " + _r_js + ";", _db_html, count=1)
+        else:
+            st.warning("vfdb.json が空、または見つかりません。表示は直前の内容のままです。")
+    except Exception as _e:
+        st.warning(f"vfdb.json 読み込みエラー: {_e}（表示は直前の内容のままです）")
+
     import streamlit.components.v1 as _components
     _components.html(_db_html, height=700, scrolling=False)
     st.stop()
@@ -3135,19 +3217,13 @@ if page_sel == "請求":
     _seikyuu_nittei = load_nittei_rows()
 
     # vfdb データ
-    _up_s = os.environ.get("USERPROFILE", "")
     _vfdb_data = []
-    for _vp in [
-        BASE_DIR / "vfdb.json",
-        *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up_s else []),
-        Path(__file__).resolve().parent / "vfdb.json",
-    ]:
-        if _vp.exists():
-            try:
-                _vfdb_data = json.loads(_vp.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-            break
+    _vp = resolve_vfdb_path()
+    if _vp is not None:
+        try:
+            _vfdb_data = json.loads(_vp.read_text(encoding="utf-8"))
+        except Exception:
+            pass
 
     _nittei_js = _json_s.dumps(_seikyuu_nittei, ensure_ascii=False)
     _vfdb_js   = _json_s.dumps(_vfdb_data,      ensure_ascii=False)
@@ -3223,14 +3299,7 @@ if page_sel == "配送":
     import streamlit.components.v1 as _kcomp_h
 
     _nittei_h = load_nittei_rows()
-    _up_h = os.environ.get("USERPROFILE", "")
-    _vfdb_path_h = next(
-        (p for p in [
-            BASE_DIR / "vfdb.json",
-            *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up_h else []),
-            Path(__file__).resolve().parent / "vfdb.json",
-        ] if p.exists()), None
-    )
+    _vfdb_path_h = resolve_vfdb_path()
     _vfdb_list_h = (
         _json_h.loads(_vfdb_path_h.read_text("utf-8")) if _vfdb_path_h else []
     )
@@ -3806,13 +3875,7 @@ if act_complete:
     else:
         kakou_dict = _load_kakou_dict()
         _jsonl_log("complete", {"count": len(checked)})
-        _up_r = os.environ.get("USERPROFILE", "")
-        _vfdb_candidates = [
-            BASE_DIR / "vfdb.json",
-            *([((detect_onedrive_work() or Path()) / "VFAP" / "vfdb.json")] if _up_r else []),
-            Path(__file__).resolve().parent / "vfdb.json",
-        ]
-        _vfdb_path = next((p for p in _vfdb_candidates if p.exists()), None)
+        _vfdb_path = resolve_vfdb_path()
         if _vfdb_path is None:
             st.error("vfdb.json が見つかりません"); st.stop()
         vfdb_raw   = json.loads(_vfdb_path.read_text(encoding="utf-8"))
@@ -4192,4 +4255,160 @@ else:
     _checked_idx = ",".join(str(i) for i, r in enumerate(filtered) if r.get("起票FLG"))
 
     st.markdown(f"""
-<styl
+<style>
+/* 行ホバー */
+.stDataFrameGlideDataEditor [role="row"]:hover [role="gridcell"] {{
+    background: rgba(255,140,40,0.10) !important;
+}}
+/* チェック行ハイライト */
+.stDataFrameGlideDataEditor [role="row"].row-checked [role="gridcell"] {{
+    background: rgba(46,158,91,0.18) !important;
+}}
+</style>
+<div id="hl-rows" data-checked="{_checked_idx}" style="display:none"></div>
+""", unsafe_allow_html=True)
+
+    _nav_comp.html(f"""<script>
+(function(){{
+  const doc = window.parent.document;
+  // ── チェック行ハイライト ──
+  const checkedSet = new Set(
+    (doc.getElementById('hl-rows')?.dataset.checked || '')
+    .split(',').filter(Boolean).map(Number)
+  );
+  function applyRowHL(){{
+    const grid = doc.querySelector('.stDataFrameGlideDataEditor');
+    if(!grid) return;
+    grid.querySelectorAll('[role="row"]').forEach((row, pos)=>{{
+      if(pos === 0) return; // ヘッダー行はスキップ
+      const ari = row.getAttribute('aria-rowindex');
+      const idx = ari != null ? Number(ari) - 2 : pos - 1;
+      row.classList.toggle('row-checked', checkedSet.has(idx));
+    }});
+  }}
+  const rowObs = new MutationObserver(applyRowHL);
+  rowObs.observe(doc.body, {{childList:true, subtree:true}});
+  [100, 400, 900].forEach(t => setTimeout(applyRowHL, t));
+
+  // ── 複数行選択 → URL params 書き込み（一括チェック用） ──
+  // aria-selected が使えないためマウスドラッグ start/end を自前追跡
+  (function(){{
+    const win = window.parent;
+    let _selStart = -1, _selEnd = -1, _dragging = false;
+
+    // クライアントY → 0ベース行インデックス
+    function rowFromClientY(clientY){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(!sc) return -1;
+      const rows = sc.querySelectorAll('[role="row"]');
+      const scRect = sc.getBoundingClientRect();
+      const relY = clientY - scRect.top;
+      const scrolledY = relY + sc.scrollTop;
+      let headerH = 35, rowH = 35;
+      if(rows.length >= 1) headerH = rows[0].getBoundingClientRect().height || 35;
+      if(rows.length >= 2) rowH   = rows[1].getBoundingClientRect().height || 35;
+      if(scrolledY < headerH) return -1;
+      return Math.floor((scrolledY - headerH) / rowH);
+    }}
+
+    // フラグ列（第1列）の幅: gridcell で取れなければ固定値
+    function getFirstColWidth(){{
+      const cell = doc.querySelector('.dvn-scroller [role="gridcell"][aria-colindex="1"]');
+      return cell ? cell.offsetWidth : 55;
+    }}
+
+    function onPointerDown(e){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(!sc) return;
+      const rect = sc.getBoundingClientRect();
+      const relX = e.clientX - rect.left;
+      const row  = rowFromClientY(e.clientY);
+
+      if(relX >= getFirstColWidth()){{
+        // フラグ列以外 → 選択ドラッグ開始として記録
+        _dragging = true;
+        _selStart = row;
+        _selEnd   = row;
+        const url = new URL(win.location.href);
+        url.searchParams.delete('_sgt_sel');
+        win.history.replaceState(null, '', url.toString());
+      }} else {{
+        // フラグ列クリック → 記録済み選択範囲で一括適用
+        _dragging = false;
+        const url = new URL(win.location.href);
+        if(_selStart >= 0 && _selEnd >= 0 && _selStart !== _selEnd){{
+          const minR = Math.min(_selStart, _selEnd);
+          const maxR = Math.max(_selStart, _selEnd);
+          const sel  = Array.from({{length: maxR - minR + 1}}, (_, i) => minR + i);
+          url.searchParams.set('_sgt_sel', sel.join(','));
+        }} else {{
+          url.searchParams.delete('_sgt_sel');
+        }}
+        win.history.replaceState(null, '', url.toString());
+      }}
+    }}
+
+    function onPointerMove(e){{
+      if(!_dragging || e.buttons !== 1) return;
+      const r = rowFromClientY(e.clientY);
+      if(r >= 0) _selEnd = r;
+    }}
+
+    function attachListeners(){{
+      const sc = doc.querySelector('.dvn-scroller');
+      if(sc && !sc._sgtSelOn){{
+        sc._sgtSelOn = true;
+        sc.addEventListener('pointerdown', onPointerDown, {{capture:true}});
+        sc.addEventListener('pointermove', onPointerMove, {{passive:true}});
+        sc.addEventListener('pointerup',   ()=>{{ _dragging=false; }}, {{passive:true}});
+      }}
+    }}
+    const selObs = new MutationObserver(attachListeners);
+    selObs.observe(doc.body, {{childList:true, subtree:true}});
+    [200, 600, 1200].forEach(t=>setTimeout(attachListeners, t));
+  }})();
+
+  // ── 列ホバー（既存） ──
+  (function injectColHL(){{
+    const ORANGE_COL = "rgba(255,140,40,0.13)";
+    function applyTo(root){{
+      root.querySelectorAll('[role="columnheader"]').forEach((th,ci)=>{{
+        th.addEventListener("mouseenter",()=>{{
+          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
+            td.style.background=ORANGE_COL;}});
+          th.style.background=ORANGE_COL;
+        }});
+        th.addEventListener("mouseleave",()=>{{
+          root.querySelectorAll(`[role="gridcell"]:nth-child(${{ci+1}})`).forEach(td=>{{
+            td.style.background="";}});
+          th.style.background="";
+        }});
+      }});
+    }}
+    const obs=new MutationObserver(()=>{{
+      doc.querySelectorAll('iframe').forEach(f=>{{
+        try{{ if(f.contentDocument) applyTo(f.contentDocument); }}catch(e){{}}
+      }});
+    }});
+    obs.observe(doc.body,{{childList:true,subtree:true}});
+  }})();
+}})();
+</script>""", height=0, scrolling=False)
+
+    st.data_editor(
+        df,
+        use_container_width=True,
+        height=650,
+        column_config={
+            "フラグ"      : st.column_config.CheckboxColumn("フラグ", help="チェックで起票フラグON"),
+            "加工時間(h)" : st.column_config.NumberColumn(format="%.1f h"),
+            "単価"        : st.column_config.NumberColumn(format="¥%d"),
+            "数量"        : st.column_config.NumberColumn(format="%d"),
+        },
+        disabled=disabled_cols,
+        hide_index=True,
+        key="order_editor",
+        on_change=_apply_flag_edits,
+    )
+
+st.markdown('<div style="height:50px"></div>', unsafe_allow_html=True)
