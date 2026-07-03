@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>納品・引取日程</title>
+<style>
+  /* スクロールバー */
+  :root { --accent:#d97757; --accent-hi:#e89070; }
+  ::-webkit-scrollbar              { width:17px; height:17px; }
+  ::-webkit-scrollbar-track        { background:#1C1C1C; }
+  ::-webkit-scrollbar-thumb        { background:var(--accent); border-radius:6px; border:2px solid #1C1C1C; }
+  ::-webkit-scrollbar-thumb:hover  { background:var(--accent-hi); }
+  ::-webkit-scrollbar-corner       { background:#1C1C1C; }
+  html,body{scrollbar-width:auto;scrollbar-color:var(--accent) #1C1C1C;}
+
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
+@media screen{
+  body{background:#1a1a1a;color:#e0e0e0;}
+  .ctrl{background:#161616;padding:8px 14px;display:flex;align-items:center;gap:10px;
+        border-bottom:1px solid #2a2a2a;position:sticky;top:0;z-index:50;flex-wrap:wrap;}
+  .ctrl h1{font-size:16px;font-weight:700;color:#fff;margin-right:4px;}
+  .ctrl label{font-size:12px;color:#888;}
+  .ctrl input[type=date]{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a;
+        border-radius:4px;padding:3px 8px;font-size:12px;}
+  .ctrl button{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a;
+        border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;}
+  .ctrl button:hover{background:#3a3a3a;}
+  .btn-pdf{background:#e86a00!important;color:#fff!important;border-color:#e86a00!important;font-weight:700;}
+  .btn-pdf:hover{background:#c55a00!important;}
+  .btn-save{background:#2e9e5b!important;color:#fff!important;border-color:#2e9e5b!important;font-weight:700;}
+  .btn-save:hover{background:#24824a!important;}
+  .week-lbl{font-size:13px;color:#888;margin-left:4px;}
+  .page-wrap{padding:12px;}
+  .page-title{font-size:14px;font-weight:700;text-align:center;margin-bottom:4px;color:#e0e0e0;}
+  .hero{text-align:center;margin-bottom:10px;}
+  .hero-co{display:none;}
+  .hero-co-en{font-size:9px;color:#e8821e;margin-left:8px;letter-spacing:2px;}
+  .print-foot{display:none;}
+  .sec-title{font-size:12px;font-weight:700;background:#242424;color:#ccc;
+             padding:4px 8px;border:1px solid #333;border-bottom:none;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{background:#1e1e1e;color:#bbb;font-size:11px;font-weight:600;
+     padding:4px 6px;border:1px solid #333;text-align:center;white-space:nowrap;}
+  td{padding:3px 6px;border:1px solid #444;vertical-align:middle;font-size:12px;}
+  tr:hover td{background:#222;}
+  td.date-c{background:#1c1c1c!important;color:#999;text-align:center;
+            white-space:pre;vertical-align:top;padding-top:5px;font-size:11px;
+            font-weight:600;border:1px solid #444!important;border-right:2px solid #666!important;}
+  td.sep{border-right:2px solid #666!important;}
+  td.r{text-align:right;}
+  td.qty{color:#f5c97b;}
+  td.del-qty{color:#8ec88e;}
+  td.kyosu{color:#e86a00;font-weight:700;}
+  td.mat{color:#ffffff;}
+  td.hako{color:#f5c97b;}
+  td.code{font-size:10px;color:#777;}
+  td.muted{color:#3a3a3a;font-style:italic;font-size:11px;}
+  td.empty{color:#444;font-style:italic;font-size:11px;}
+  .kyoyu-sel{width:100%;background:#1c1c1c;color:#e0e0e0;border:1px solid #333;
+             border-radius:3px;padding:2px 4px;font-size:12px;font-family:inherit;}
+  .kyoyu-sel:focus{outline:1px solid #e86a00;}
+  td.sono-qty,td.sono-dt{color:#e0e0e0;text-align:center;}
+  td.sono-qty:focus,td.sono-dt:focus{outline:1px solid #e86a00;background:#1e1e1e;}
+  td.pick-qty{text-align:right;color:#f5c97b;cursor:text;min-width:44px;}
+  td.pick-qty:focus{outline:1px solid #e86a00;background:#1e1e1e;color:#fff;}
+  td.pick-qty.edited{color:#fff;font-weight:600;}
+  tr.day-end td{border-bottom:2px solid #555!important;}
+  td.hako-muted{color:#444;}
+  .biko{border:1px solid #252525;min-height:64px;padding:6px;background:#1c1c1c;color:#e0e0e0;font-size:11px;cursor:text;}
+  .biko:focus{outline:1px solid #e86a00;color:#e0e0e0;}
+  .biko:empty::before{content:attr(data-placeholder);color:#555;pointer-events:none;}
+  td.nm{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  td.nm-sm{max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;}
+}
+@media print{
+  @page{size:A4 landscape;margin:8mm 10mm;}
+  .ctrl{display:none!important;}
+  html,body{width:297mm!important;}
+  body{background:#fff;color:#1a1a1a;font-size:8.5pt;
+       font-family:'Segoe UI','Meiryo','Yu Gothic UI',sans-serif;}
+  .page-wrap{padding:0;width:100%;}
+  /* ヒーロー：フラットなダークタイル＋罫線 */
+  .hero{display:flex;align-items:baseline;justify-content:space-between;
+        background:#1f1f1f!important;color:#fff;padding:9px 16px;border-radius:0;margin-bottom:9px;
+        border:2px solid #1f1f1f;
+        -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .hero-co{font-size:15pt;font-weight:600;letter-spacing:1px;color:#fff;}
+  .hero-co-en{font-size:7pt;color:#bdbdbd;letter-spacing:3px;margin-left:12px;font-weight:400;}
+  .page-title{font-size:10.5pt;font-weight:400;color:#fff;background:transparent!important;
+              border:none;padding:0;margin:0;text-align:right;letter-spacing:1px;}
+  /* セクション見出し：フラットなグレータイル＋罫線 */
+  .sec-title{font-size:8.5pt;font-weight:600;color:#fff;background:#333!important;
+             padding:4px 10px;border:1.5px solid #333;border-radius:0;letter-spacing:1.5px;
+             -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:166mm;}
+  .two-col>div{display:flex;flex-direction:column;}
+  table{border-collapse:collapse;width:100%;font-size:9pt;}
+  /* ヘッダー：チャコールタイル×白（1本のバーに見える） */
+  th{background:#4d4d4d!important;color:#fff!important;padding:5px;
+     border:1px solid #4d4d4d;text-align:center;font-weight:600;letter-spacing:.5px;
+     -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  th.sep{border-right:1px solid #fff!important;}
+  /* 全セル統一罫線（縦横） */
+  td{padding:4px 6px;border:1px solid #d0d0d0!important;
+     color:#1a1a1a!important;font-size:9pt;}
+  /* 薄いシマ（モノクロでも同じ見え方） */
+  tbody tr:nth-child(even) td{background:#f5f5f5!important;
+     -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  td.date-c{background:#ececec!important;color:#1a1a1a!important;font-weight:600;
+            text-align:center;white-space:pre-line;vertical-align:middle;
+            border:1px solid #d0d0d0!important;
+            -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  td.sep{border-right:2px solid #999!important;}
+  /* 日区切り：下罫を太く */
+  tr.day-end td{border-bottom:2px solid #4d4d4d!important;
+     -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  /* 色は使わず太字で強弱（数量系を強調） */
+  td.qty{color:#1a1a1a!important;font-weight:700;}
+  td.del-qty{color:#1a1a1a!important;font-weight:700;}
+  td.kyosu{color:#1a1a1a!important;font-weight:700;}
+  td.mat{color:#1a1a1a!important;}
+  td.hako{color:#1a1a1a!important;}
+  td.code{color:#8a8a8a!important;}
+  td.muted{color:#bbb!important;}
+  td.empty{color:#aaa!important;font-style:italic;}
+  td.pick-qty{text-align:right;color:#1a1a1a!important;font-weight:700;}
+  .kyoyu-sel{width:100%;border:none;background:transparent;font-size:9pt;
+             font-family:inherit;color:#1a1a1a;-webkit-appearance:none;appearance:none;}
+  .biko{border:1px solid #d0d0d0;flex:1;min-height:34mm;background:#fff;}
+  td.nm,td.nm-sm{white-space:normal;}
+  td.hako-muted{color:#bbb;}
+  /* フッター：細い罫＋会社情報 */
+  .print-foot{display:block;margin-top:7px;padding-top:5px;border-top:1px solid #1f1f1f;
+              font-size:7.5pt;color:#555;text-align:center;letter-spacing:1px;font-weight:400;
+              -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+
+}
+</style>
+</head>
+<body>
+<div class="ctrl">
+  <h1>📦 納品・引取日程</h1>
+  <label>週起点：</label>
+  <input type="date" id="week-start">
+  <button onclick="prevWeek()">◀</button>
+  <button onclick="nextWeek()">▶</button>
+  <button onclick="setThisWeek()">今週</button>
+  <span class="week-lbl" id="week-lbl"></span>
+  <button class="btn-pdf" onclick="window.print()">🖨 PDF出力</button>
+  <button class="btn-save" id="btn-save-state" onclick="saveHaisoState()">💾 保存</button>
+</div>
+<div class="page-wrap">
+  <div class="hero">
+    <div class="hero-co">黒部工業株式会社</div>
+    <div class="page-title" id="page-title">納品・引取日程</div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;">
+    <div>
+      <div class="sec-title">納品　／　基材引取</div>
+      <table>
+        <thead>
+          <tr>
+            <th rowspan="2" style="width:54px;">日付</th>
+            <th colspan="3" class="sep">納　品</th>
+            <th colspan="4">基材引取</th>
+          </tr>
+          <tr>
+            <th style="width:52px;">明細No</th>
+            <th>品名</th>
+            <th class="sep" style="width:46px;">注文数</th>
+            <th>品名（材料）</th>
+            <th style="width:44px;">数量</th>
+            <th>梱包箱</th>
+            <th style="width:44px;">支給数</th>
+          </tr>
+        </thead>
+        <tbody id="left-tb"></tbody>
+      </table>
+    </div>
+    <div style="min-width:230px;display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <div class="sec-title">その他、支給依頼（梱包資材）</div>
+        <table>
+          <thead><tr><th>資材名</th><th style="width:50px;">数量</th><th style="width:70px;">支給希望日</th></tr></thead>
+          <tbody id="sono-ta-tb">
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+            <tr><td><select class="kyoyu-sel"><option value=""></option><option>PE規格シート</option><option>筋入クラフト紙　ロール</option><option>筋入クラフト紙　シート　L=888用</option><option>カートンテープ</option><option>インク　M-505A</option><option>希釈液　SOL-23A</option></select></td><td class="sono-qty" contenteditable="true"></td><td class="sono-dt" contenteditable="true"></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="sec-title">備考</div>
+        <div class="biko" contenteditable="true" data-placeholder="備考を入力…"></div>
+      </div>
+    </div>
+  </div>
+  <div class="print-foot">〒938-0005　富山県下新川郡入善町新屋2220　／　TEL 0765-78-2383　FAX 0765-78-2384</div>
+</div>
+<script>
+const NITTEI = [];
+const VFDB_LIST = [];
+
+function normName(s){return s?String(s).replace(/[\s　 ]+/g,''):''}
+function trimMatName(s){return s?String(s).replace(/\s*L=?\d+(\.\d+)?/g,'').trim():''}
+const vMap={};
+for(const r of VFDB_LIST){const k=normName(r['品名']);if(k)vMap[k]=r;}
+
+const pad=n=>String(n).padStart(2,'0');
+const toYMD=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const toMMDD=d=>`${pad(d.getMonth()+1)}/${pad(d.getDate())}`;
+const WDAYS=['日','月','火','水','木','金','土'];
+
+function getMon(ymd){
+  const d=new Date(ymd+'T00:00:00');
+  const day=d.getDay();
+  d.setDate(d.getDate()+(day===0?-6:1-day));
+  return d;
+}
+function parseMMDD(mmdd){
+  if(!mmdd)return null;
+  const[m,day]=mmdd.split('/').map(Number);
+  if(!m||!day)return null;
+  const now=new Date();
+  const y=(m<now.getMonth()-2)?now.getFullYear()+1:now.getFullYear();
+  return new Date(y,m-1,day);
+}
+function setThisWeek(){
+  document.getElementById('week-start').value=toYMD(getMon(toYMD(new Date())));
+  render();
+}
+function prevWeek(){
+  const d=new Date(document.getElementById('week-start').value+'T00:00:00');
+  d.setDate(d.getDate()-7);
+  document.getElementById('week-start').value=toYMD(d);
+  render();
+}
+function nextWeek(){
+  const d=new Date(document.getElementById('week-start').value+'T00:00:00');
+  d.setDate(d.getDate()+7);
+  document.getElementById('week-start').value=toYMD(d);
+  render();
+}
+document.getElementById('week-start').addEventListener('change',render);
+
+function mkTd(text,cls,style){
+  const el=document.createElement('td');
+  el.textContent=text??'';
+  if(cls)el.className=cls;
+  if(style)el.style.cssText=style;
+  return el;
+}
+
+function render(){
+  const monVal=document.getElementById('week-start').value;
+  if(!monVal)return;
+  const mon=new Date(monVal+'T00:00:00');
+  const days=Array.from({length:5},(_,i)=>{
+    const d=new Date(mon);d.setDate(d.getDate()+i);return d;
+  });
+  const label=`${toMMDD(mon)} ～${toMMDD(days[4])}`;
+  document.getElementById('week-lbl').textContent=label;
+  document.getElementById('page-title').textContent=`納品・引取日程　${label}`;
+
+  const weekSet=new Set(days.map(toMMDD));
+  const delMap={},pickMap={};
+  for(const k of weekSet){delMap[k]=[];pickMap[k]=[];}
+  for(const r of NITTEI){
+    const adD=parseMMDD(r.ad);
+    if(adD){const k=toMMDD(adD);if(weekSet.has(k))delMap[k].push(r);}
+    const acD=parseMMDD(r.ac);
+    if(acD){const k=toMMDD(acD);if(weekSet.has(k))pickMap[k].push(r);}
+  }
+
+  // 左テーブル
+  const ltb=document.getElementById('left-tb');
+  ltb.innerHTML='';
+  for(const d of days){
+    const key=toMMDD(d);
+    const wday=WDAYS[d.getDay()];
+    const dels=delMap[key];
+    // 基材引取：hakoNmでグループ化（rowspan）、matNameは個別表示
+    const PICK_MUTE_PFX=['灯具-3','LED-A888','H型ジョイナー端材'].map(normName);
+    const isMuted=h=>PICK_MUTE_PFX.some(m=>normName(h).startsWith(m));
+    const pickRaw=pickMap[key];
+    // Step1: hakoNm → {entries:[{matName,qty}], irisu, muted, totalQty}
+    const hakoGroups=new Map();
+    for(const p of pickRaw){
+      const vf=vMap[normName(p.nm)]||{};
+      const matName=trimMatName(vf['備考']||p.nm||'');
+      const qty=Number(p.qty)||0;
+      const hakoNm=vf['箱名']||'—';
+      const irisu=parseFloat(vf['梱包'])||0;
+      const muted=isMuted(hakoNm);
+      const kyukyu=p.kyukyu!=null?p.kyukyu:null;
+      if(!hakoGroups.has(hakoNm))hakoGroups.set(hakoNm,{entries:[],irisu,muted,totalQty:0,kyukyu:null});
+      const g=hakoGroups.get(hakoNm);
+      g.totalQty+=qty;
+      if(g.kyukyu==null&&kyukyu!=null)g.kyukyu=kyukyu;
+      const ex=g.entries.find(e=>e.matName===matName);
+      if(ex)ex.qty+=qty; else g.entries.push({matName,qty});
+    }
+    // Step2: flatten → picks[] with hakoNm rowspan情報
+    const picks=[];
+    for(const [hakoNm,g] of hakoGroups){
+      const shosu=g.muted?'—':(g.irisu>0?Math.ceil(g.totalQty/g.irisu):'—');
+      g.entries.forEach((e,idx)=>{
+        picks.push({matName:e.matName,qty:e.qty,hakoNm,showHako:idx===0,hakoRowspan:g.entries.length,shosu,muted:g.muted,showMatName:true,matNameRowspan:1,kyukyu:g.kyukyu});
+      });
+    }
+    // Step3: 連続する同一matNameにrowspanを付与
+    let pi=0;
+    while(pi<picks.length){
+      const mn=picks[pi].matName;
+      let pj=pi+1;
+      while(pj<picks.length&&picks[pj].matName===mn)pj++;
+      picks[pi].matNameRowspan=pj-pi;
+      for(let pk=pi+1;pk<pj;pk++)picks[pk].showMatName=false;
+      pi=pj;
+    }
+    // Step4: 灯具カバー の数量を同一品名で合算し100/200単位に切り上げ
+    const toguCoverTotals=new Map();
+    for(const p of picks){
+      if(p.matName&&p.matName.includes('灯具カバー')){
+        toguCoverTotals.set(p.matName,(toguCoverTotals.get(p.matName)||0)+(p.qty||0));
+      }
+    }
+    const rows=Math.max(1,dels.length,picks.length);
+    for(let i=0;i<rows;i++){
+      const tr=document.createElement('tr');
+      if(i===0){
+        const dtd=mkTd(`${key}\n(${wday})`,'date-c');
+        dtd.rowSpan=rows;
+        tr.appendChild(dtd);
+      }
+      const del=dels[i];
+      if(del){
+        const noStr=del.no?String(parseInt(del.no,10)):'';
+        const vfD=vMap[normName(del.nm)]||{};
+        tr.appendChild(mkTd(noStr,'','font-size:10px;color:#888;text-align:center;'));
+        tr.appendChild(mkTd(vfD['略称']||del.nm||'','nm'));
+        tr.appendChild(mkTd(del.qty!=null?Number(del.qty).toLocaleString():'','del-qty r sep'));
+      }else if(i===0&&dels.length===0){
+        const ntd=mkTd('納品なし','empty sep');ntd.colSpan=3;tr.appendChild(ntd);
+      }else{
+        tr.appendChild(mkTd('',''));
+        tr.appendChild(mkTd('',''));
+        tr.appendChild(mkTd('','sep'));
+      }
+      const pick=picks[i];
+      if(pick){
+        if(pick.showMatName){
+          const mntd=mkTd(pick.matName,'mat nm');
+          if(pick.matNameRowspan>1)mntd.rowSpan=pick.matNameRowspan;
+          tr.appendChild(mntd);
+        }
+        const isShowcase=pick.matName&&(pick.matName.includes('ショーケース')||pick.matName.includes('ｼｮｰｹｰｽ'));
+        const isToguCover=pick.matName&&pick.matName.includes('灯具カバー');
+        let qtyDisp='';
+        if(pick.qty!=null){
+          if(isShowcase){
+            qtyDisp=pick.kyukyu?Number(pick.kyukyu).toLocaleString():'';
+          }else if(isToguCover){
+            if(pick.showMatName){
+              const tot=toguCoverTotals.get(pick.matName)||0;
+              qtyDisp=String(Math.ceil(tot/100)*100);
+            }
+          }else{
+            qtyDisp='要数';
+          }
+        }
+        tr.appendChild(mkTd(qtyDisp,'qty r'));
+        if(pick.showHako){
+          const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
+          if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
+          tr.appendChild(hakTd);
+          const shosuTd=mkTd(String(pick.shosu),'r pick-qty');
+          shosuTd.contentEditable='true';
+          shosuTd.dataset.day=key;
+          shosuTd.dataset.hako=pick.hakoNm;
+          shosuTd.addEventListener('input',function(){shosuTd.classList.add('edited');});
+          if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
+          tr.appendChild(shosuTd);
+        }
+      }else if(i===0&&picks.length===0){
+        const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
+      }else{
+        tr.appendChild(mkTd('',''));
+        tr.appendChild(mkTd('',''));
+        tr.appendChild(mkTd('',''));
+        tr.appendChild(mkTd('',''));
+      }
+      if(i===rows-1) tr.classList.add('day-end');
+      ltb.appendChild(tr);
+    }
+  }
+
+  loadHaisoState(monVal);
+}
+
+// ── 入力状態の保存/読込（支給数・支給依頼・備考をJSONでOneDrive側に保管）──
+const HAISO_API='http://localhost:8503';
+
+function collectHaisoState(){
+  const shosu={};
+  document.querySelectorAll('#left-tb td.pick-qty[data-day]').forEach(function(td){
+    const k=td.dataset.day+'|'+td.dataset.hako;
+    shosu[k]=td.textContent.trim();
+  });
+  const sono=[];
+  document.querySelectorAll('#sono-ta-tb tr').forEach(function(tr){
+    const sel=tr.querySelector('.kyoyu-sel');
+    const qty=tr.querySelector('.sono-qty');
+    const dt=tr.querySelector('.sono-dt');
+    sono.push({sel:sel?sel.value:'',qty:qty?qty.textContent.trim():'',dt:dt?dt.textContent.trim():''});
+  });
+  const bikoEl=document.querySelector('.biko');
+  const biko=bikoEl?bikoEl.textContent.trim():'';
+  return {shosu,sono,biko};
+}
+
+function loadHaisoState(weekKey){
+  if(!weekKey)return;
+  fetch(HAISO_API+'/haiso_state?week='+encodeURIComponent(weekKey))
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(st){
+      if(!st||!st.ok)return;
+      const d=st.data||{};
+      if(d.shosu){
+        document.querySelectorAll('#left-tb td.pick-qty[data-day]').forEach(function(td){
+          const k=td.dataset.day+'|'+td.dataset.hako;
+          if(Object.prototype.hasOwnProperty.call(d.shosu,k)){
+            td.textContent=d.shosu[k];
+            td.classList.add('edited');
+          }
+        });
+      }
+      if(Array.isArray(d.sono)){
+        const rows=document.querySelectorAll('#sono-ta-tb tr');
+        d.sono.forEach(function(row,i){
+          const tr=rows[i]; if(!tr)return;
+          const sel=tr.querySelector('.kyoyu-sel'); if(sel&&row.sel!=null)sel.value=row.sel;
+          const qty=tr.querySelector('.sono-qty'); if(qty&&row.qty!=null)qty.textContent=row.qty;
+          const dt=tr.querySelector('.sono-dt'); if(dt&&row.dt!=null)dt.textContent=row.dt;
+        });
+      }
+      if(typeof d.biko==='string'){
+        const b=document.querySelector('.biko'); if(b)b.textContent=d.biko;
+      }
+    })
+    .catch(function(){/* サーバー未起動（単体プレビュー等）は無視 */});
+}
+
+function saveHaisoState(){
+  const weekKey=document.getElementById('week-start').value;
+  if(!weekKey){alert('週が表示されてません');return;}
+  const btn=document.getElementById('btn-save-state');
+  const old=btn.textContent; btn.disabled=true; btn.textContent='保存中…';
+  fetch(HAISO_API+'/save_haiso_state',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({week:weekKey,data:collectHaisoState()})})
+    .then(function(r){return r.json();})
+    .then(function(j){btn.textContent=j.ok?'✓ 保存しました':'✗ '+(j.msg||'失敗');})
+    .catch(function(){btn.textContent='✗ 通信失敗';})
+    .then(function(){setTimeout(function(){btn.textContent=old;btn.disabled=false;},2600);});
+}
+
+document.addEventListener('DOMContentLoaded', setThisWeek);
+</script>
+</body>
+</html>
