@@ -980,9 +980,10 @@ function sortPicksByDue(){
   const sorted=mvPicks.slice().sort((a,b)=>(dueKey(a)-dueKey(b))*mvSortDir);
   slots.forEach((s,i)=>rows[s]=sorted[i]);                        // 同じ枠に並べ替えて戻す
   mvPicks=sorted;                                                 // 選択は維持
-  buildBody();markDirty();
+  buildBody();
   toast(`選択${sorted.length}行を期限${mvSortDir>0?'昇順':'降順'}でソート`);
   mvSortDir*=-1;                                                  // 次回は逆向き
+  saveRows();
 }
 function clearPicks(){mvPicks=[];mvAnchor=null;applyPicks();}
 function setRange(aIdx,bIdx){
@@ -1064,7 +1065,7 @@ function onGripUp(e){
     document.querySelectorAll('tr.dragging').forEach(tr=>tr.classList.remove('dragging'));
     if(blockDrag){mvPicks=blockObjs?blockObjs.slice():[];mvAnchor=null;applyPicks();}  // 移動後も選択は維持
     dragEl=null;dragIdx=null;blockObjs=null;
-    markDirty();
+    saveRows();
   }else if(!lpFired && mvAnchor!=null){           // 長押し後の2点目タップ＝範囲確定
     setRange(mvAnchor,downIdx);
   }
@@ -1166,8 +1167,7 @@ function commitEdit(ac, rebuild=true){
   activeCell=null;
   if(rebuild){
     buildBody();
-    if(field==='done'){ saveRows(); }
-    else { markDirty(); toast('更新しました（保存ボタンで書き込み）'); }
+    saveRows();
   }
 }
 
@@ -1247,7 +1247,7 @@ function autoAssignDenno(silent=false){
     });
   });
 
-  if(!silent){buildBody();markDirty();toast('伝票Noを再採番しました（'+changed+'件変更）');}
+  if(!silent){buildBody();toast('伝票Noを再採番しました（'+changed+'件変更）');saveRows();}
 }
 
 function resetOrder(){rows=JSON.parse(JSON.stringify(original));markClean();buildBody();toast("元に戻したで");}
@@ -1272,7 +1272,7 @@ async function saveRows(){
   const btn = document.getElementById('save-btn');
   if(btn){ btn.disabled=true; btn.textContent='保存中…'; }
   try {
-    const resp = await fetch('http://localhost:8502/', {
+    const resp = await fetch('http://localhost:8512/', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(rows)
@@ -1335,13 +1335,15 @@ function confirmDelete(){
     clearPicks();
     closeConfirm();
     buildBody();
-    markDirty();toast(`${cnt}件を削除しました（保存で確定）`);
+    toast(`${cnt}件を削除しました`);
+    saveRows();
   }else if(pendingDeleteIdx!==null){
     rows.splice(pendingDeleteIdx,1);
     pendingDeleteIdx=null;
     closeConfirm();
     buildBody();
-    markDirty();toast('削除しました（保存で確定）');
+    toast('削除しました');
+    saveRows();
   }
 }
 function closeConfirm(){
@@ -1354,7 +1356,7 @@ function closeConfirm(){
 // ══════════════════════════════════════════════
 // 加工記録 別窓化 v3
 // ══════════════════════════════════════════════
-const KAKOU_PORT    = 8503;
+const KAKOU_PORT    = 8513;
 const KR_FIXED_ROWS = 10;
 const KR_LOT_ROWS   = 5;
 const KR_MAX_COL    = 4;
@@ -1759,7 +1761,7 @@ async function syncDoneFromKakou(rebuild=true){
 // ── 起動時: サーバーから nittei.json を取得して rows を完全置換 ──
 (async function initRows(){
   try {
-    const resp = await fetch('http://localhost:8502/', {cache:'no-store'});
+    const resp = await fetch('http://localhost:8512/', {cache:'no-store'});
     if(resp.ok){
       const data = await resp.json();
       if(Array.isArray(data) && data.length > 0){

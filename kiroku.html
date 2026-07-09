@@ -503,7 +503,7 @@ console.log('テスト 6月19日');
 // ══════════════════════════════════════════════
 // 定数
 // ══════════════════════════════════════════════
-const KAKOU_PORT    = 8503;
+const KAKOU_PORT    = 8513;
 const KR_FIXED_ROWS = 10;
 const KR_LOT_ROWS   = 5;
 const KR_MAX_COL    = 4;
@@ -653,7 +653,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   _meta   = JSON.parse(metaStr);
   _specRx = specStr ? JSON.parse(specStr) : null;
 
-  // 既存記録を同一オリジン fetch（http://localhost:8503/）
+  // 既存記録を同一オリジン fetch（http://localhost:8513/）
   let existing = null;
   try {
     const resp = await fetch('/', {cache:'no-store'});
@@ -782,7 +782,7 @@ function _buildLotRows(d) {
 }
 
 const _kv = x => (x != null && x !== 0 && x !== '') ? x : '';
-const _kvKeis = x => (x != null && x !== '') ? parseFloat(x).toFixed(2) : '';
+const _kvKeis = x => (x != null && x !== 0 && x !== '') ? parseFloat(x).toFixed(2) : '';
 
 function _addKrRow(data, ri) {
   const tbody = document.getElementById('k2-daily-body');
@@ -977,8 +977,12 @@ function normalizeWorkDate(el){
   if(out!==el.value) el.value=out;
 }
 
+function zenToHanLot(s){
+  return s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+          .replace(/[／]/g,'/').replace(/[－―ー]/g,'-').replace(/[．]/g,'.').replace(/[　]/g,' ');
+}
 function normalizeLotDate(el){
-  const v=(el.value||'').trim();
+  const v=zenToHanLot((el.value||'').trim());
   if(!v)return;
   const now=new Date();
   let YY=String(now.getFullYear()%100).padStart(2,'0'), mm, dd, m;
@@ -1106,9 +1110,9 @@ function _buildRecord() {
     const inOndo      = tr.querySelector('input[data-col="2"]');
     const inKeisoku   = tr.querySelector('input[data-col="3"]');
     const inKakou     = tr.querySelector('input[data-col="4"]');
-    // draft='1'は表示用フラグのみ。inp.valueには正しい値が入っているので保存時は無視する
-    const dsv = inp => inp?.value?.trim() || '';
-    const dnv = inp => parseFloat(inp?.value || '0') || 0;
+    // draft='1'（上の行からコピーされた仮表示）はまだ未入力扱い。保存時は無視して空欄として扱う
+    const dsv = inp => (inp?.dataset?.draft === '1') ? '' : (inp?.value?.trim() || '');
+    const dnv = inp => (inp?.dataset?.draft === '1') ? 0 : (parseFloat(inp?.value || '0') || 0);
     const sakugyobi = dsv(inSakugyobi);
     const kakou_su  = parseInt(inKakou?.value||'0',10)||0;
     // 作業日・加工数が空でも、計測Lot/温度/計測値のどれかが入っていれば行を残す
@@ -1299,12 +1303,12 @@ document.addEventListener('keydown', function(e) {
   else if(e.key === 'ArrowDown') { nr = Math.min(ri+1, KR_LAST_ROW); dir = -1; }
   else if(e.key === 'ArrowUp')   { nr = Math.max(ri-1, 0); dir = -1; }
   else return;
-  // 下書き表示のまま移動・確定する場合は、表示中の値で確定とする
+  // 下書き表示のまま（実際にキー入力せず）移動した場合は、確定せず空欄に戻す
+  // ※以前はここで確定扱いにしていたが、素通りしただけで未入力データが保存される
+  //   バグの原因だったため、実入力（input/compositionendイベント）があった時だけ確定する
   if(el.tagName === 'INPUT' && el.dataset && el.dataset.draft === '1'){
     el.dataset.draft = ''; el.classList.remove('kr-draft');
-    _krDirty = true;
-    if(el.dataset.col === '1') updateKrSummary();   // ロット使用数を即時更新
-    if(el.dataset.col === '2') updateOndanKansan(el); // 温度換算を即時更新
+    el.value = '';
   }
   e.preventDefault();
   function _goCell(nr, nc, dir) {

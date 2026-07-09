@@ -22,7 +22,7 @@ import subprocess
 import tempfile
 import threading
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ──────────────────────────────────────────────────────────
 def find_excel_exe() -> str | None:
@@ -1357,7 +1357,7 @@ def _daily_backup():
 
 
 # ── iframe内に差し込む「保管庫に保存」ボタン（表示中の週/月をそのままPDF化）──
-#   表示中DOMから<script>を除去した静止HTMLを 8503 サーバへ送る → Edgeでrender
+#   表示中DOMから<script>を除去した静止HTMLを 8513 サーバへ送る → Edgeでrender
 _CHOHYO_INJECT_HAISO = r"""
 <script>
 (function(){
@@ -1383,7 +1383,7 @@ _CHOHYO_INJECT_HAISO = r"""
       var clone=document.documentElement.cloneNode(true);
       clone.querySelectorAll('script').forEach(function(s){s.remove();});
       var old=b.textContent; b.disabled=true; b.textContent='保存中…';
-      fetch('http://localhost:8503/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
+      fetch('http://localhost:8513/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({kind:'配送日程表',year:String(y),month:m,landscape:true,
           filename:y+m+dd+'_配送日程表.pdf',html:clone.outerHTML})})
         .then(function(r){return r.json();})
@@ -1416,7 +1416,7 @@ _CHOHYO_INJECT_SEIKYUU = r"""
       var clone=document.documentElement.cloneNode(true);
       clone.querySelectorAll('script').forEach(function(s){s.remove();});
       var old=b.textContent; b.disabled=true; b.textContent='保存中…';
-      fetch('http://localhost:8503/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
+      fetch('http://localhost:8513/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({kind:'請求明細書',year:year,landscape:false,
           filename:label+'_請求明細書.pdf',html:clone.outerHTML})})
         .then(function(r){return r.json();})
@@ -1501,7 +1501,7 @@ def _html_to_pdf_edge(html_text: str, out_pdf: Path, landscape: bool = False) ->
             pass
 
 # ══════════════════════════════════════════════════════════
-# nittei.json 保存サーバー（バックグラウンドスレッド port:8502）
+# nittei.json 保存サーバー（バックグラウンドスレッド port:8512）
 # ══════════════════════════════════════════════════════════
 
 def _sync_kakozu_status(base_dir, nittei_rows: list):
@@ -1541,7 +1541,7 @@ def _sync_kakozu_status(base_dir, nittei_rows: list):
         except Exception:
             pass
 
-_SAVE_PORT = 8502
+_SAVE_PORT = 8512
 _save_lock = threading.Lock()
 
 # ── Gist自動push（保存トリガー） ────────────────────────────────────────────
@@ -1566,6 +1566,81 @@ def _gist_push_async():
             _gist_push_running.release()
     threading.Thread(target=_run, daemon=True).start()
 
+# ══════════════════════════════════════════════════════════
+# Gist同期（VFAP_gist版：端末間共有の「正」）
+#   保存時: OneDrive書き出し＋この関数でGistへ投函
+#   読込時: Gistを正としてローカルnittei.jsonを更新
+# ══════════════════════════════════════════════════════════
+import socket as _socket
+import urllib.request as _urlreq
+
+RAW_GIST_ID   = "2a041fc0df1f6c82fe223f8fc246da50"
+RAW_GIST_FILE = "nittei_raw.json"
+_GIST_SCRIPT_DIR = Path(__file__).resolve().parent
+
+def _gist_pat() -> str:
+    envf = _GIST_SCRIPT_DIR / ".env"
+    if envf.exists():
+        for ln in envf.read_text(encoding="utf-8").splitlines():
+            ln = ln.strip()
+            if ln.startswith("GITHUB_PAT="):
+                return ln.split("=", 1)[1].strip().strip('"').strip("'")
+    return os.environ.get("GITHUB_PAT", "")
+
+def _gist_pull_nittei():
+    """Gistの nittei_raw.json から rows(list) を返す。失敗時 None。"""
+    pat = _gist_pat()
+    if not pat:
+        return None
+    try:
+        req = _urlreq.Request(
+            f"https://api.github.com/gists/{RAW_GIST_ID}",
+            headers={"Authorization": f"token {pat}", "User-Agent": "vfap-gist",
+                     "Accept": "application/vnd.github+json"})
+        with _urlreq.urlopen(req, timeout=15) as r:
+            g = json.load(r)
+        raw = g["files"][RAW_GIST_FILE]["content"]
+        payload = json.loads(raw)
+        rows = payload.get("rows") if isinstance(payload, dict) else payload
+        return rows if isinstance(rows, list) else None
+    except Exception:
+        return None
+
+def _gist_push_nittei(rows) -> bool:
+    """rows(list)をGistの nittei_raw.json へ投函。成功でTrue。"""
+    pat = _gist_pat()
+    if not pat or not isinstance(rows, list):
+        return False
+    try:
+        payload = {
+            "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "device":   _socket.gethostname(),
+            "rows":     rows,
+        }
+        body = json.dumps({"files": {RAW_GIST_FILE: {
+            "content": json.dumps(payload, ensure_ascii=False, indent=2)}}}).encode("utf-8")
+        req = _urlreq.Request(
+            f"https://api.github.com/gists/{RAW_GIST_ID}", data=body, method="PATCH",
+            headers={"Authorization": f"token {pat}", "User-Agent": "vfap-gist",
+                     "Accept": "application/vnd.github+json"})
+        with _urlreq.urlopen(req, timeout=20) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+def _refresh_nittei_from_gist(base_dir) -> bool:
+    """Gistを正としてローカル nittei.json を更新。更新できたら True。"""
+    rows = _gist_pull_nittei()
+    if rows is None:
+        return False
+    try:
+        (Path(base_dir) / "nittei.json").write_text(
+            json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 class _SaveHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -1576,6 +1651,10 @@ class _SaveHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
+        try:
+            _refresh_nittei_from_gist(self.__class__.base_dir)  # Gistを正に更新
+        except Exception:
+            pass
         nittei_path = self.__class__.base_dir / "nittei.json"
         with _save_lock:
             data = nittei_path.read_bytes() if nittei_path.exists() else b"[]"
@@ -1594,10 +1673,15 @@ class _SaveHandler(BaseHTTPRequestHandler):
                     json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
                 # 加工完了依頼の sgt_status.json 同期（qty==done の依頼を加工済に更新）
                 _sync_kakozu_status(self.__class__.base_dir, data)
-            _gist_push_async()  # 保存後にGistへ自動push
+            _gist_ok = False
+            try:
+                _gist_ok = _gist_push_nittei(data)  # 端末間共有の正へ投函
+            except Exception:
+                _gist_ok = False
+            _gist_push_async()  # モバイル用 reminder_sync も従来通り
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
-            self.wfile.write(b'{"ok":true}')
+            self.wfile.write(json.dumps({"ok": True, "gist": _gist_ok}).encode())
         except Exception as e:
             self.send_response(500); self._cors(); self.end_headers()
             self.wfile.write(f'{{"error":"{e}"}}'.encode())
@@ -1614,9 +1698,9 @@ def _start_save_server(base_dir: Path):
 _start_save_server(BASE_DIR)
 
 # ══════════════════════════════════════════════════════════
-# kakou_kiroku.json 保存サーバー（バックグラウンドスレッド port:8503）
+# kakou_kiroku.json 保存サーバー（バックグラウンドスレッド port:8513）
 # ══════════════════════════════════════════════════════════
-_KAKOU_PORT = 8503
+_KAKOU_PORT = 8513
 _kakou_lock = threading.Lock()
 
 def _save_case_json(base_dir: Path, record: dict):
@@ -2492,6 +2576,10 @@ def sync_sgt_to_nittei() -> tuple:
 
 
 def load_nittei_rows() -> list:
+    try:
+        _refresh_nittei_from_gist(BASE_DIR)  # Gistを正にローカル更新
+    except Exception:
+        pass
     nittei_path = BASE_DIR / "nittei.json"
     if not nittei_path.exists():
         # フォールバック：app.pyと同階層も探す
@@ -3002,8 +3090,8 @@ if page_sel == "加工記録":
         import re as _re_k, unicodedata as _ud_k
         import streamlit.components.v1 as _kcomp2
 
-        WORK_MIN = 485.0           # 実働 7:55-17:05 − 休憩65分
-        WORK_H   = WORK_MIN / 60.0 # ≒ 8.08h
+        WORK_MIN = 475.0           # 実働 8:00-17:05 − 休憩65分 − 清掃5分
+        WORK_H   = WORK_MIN / 60.0 # ≒ 7.92h（7時間55分）
 
         _spec = build_vfdb_spec_by_name()
         def _nm_k(s):
@@ -3042,11 +3130,36 @@ if page_sel == "加工記録":
                     "hon": hon, "kosuu": kosuu, "hours": hours,
                 })
 
+        # 対象期間：過去1ヶ月（今日を含む直近1ヶ月分の加工日のみ表示）
+        _today_k = datetime.now().date()
+        if _today_k.month == 1:
+            _cutoff_k = _today_k.replace(year=_today_k.year - 1, month=12)
+        else:
+            import calendar as _cal_k
+            _prev_m_k = _today_k.month - 1
+            _last_day_k = _cal_k.monthrange(_today_k.year, _prev_m_k)[1]
+            _cutoff_k = _today_k.replace(month=_prev_m_k, day=min(_today_k.day, _last_day_k))
+
+        def _lot_date_k(lot):
+            m = _re_k.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', lot)
+            if not m:
+                return None
+            yy, mm, dd = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                return datetime(2000 + yy, mm, dd).date()
+            except Exception:
+                return None
+
         _cards = ""
+        _pct_list = []
         for lot in sorted(_by_day, reverse=True):
+            _ld = _lot_date_k(lot)
+            if _ld is None or _ld < _cutoff_k or _ld > _today_k:
+                continue  # 過去1ヶ月の範囲外（or 日付不明）はスキップ
             items = _by_day[lot]
             sum_h = round(sum(it["hours"] for it in items if it["hours"] is not None), 1)
             pct = round(sum_h / WORK_H * 100) if WORK_H > 0 else 0
+            _pct_list.append(pct)
             if   pct >= 100: _cls = "ef-blue"
             elif pct >= 80:  _cls = "ef-green"
             elif pct >= 50:  _cls = "ef-yellow"
@@ -3071,13 +3184,27 @@ if page_sel == "加工記録":
                 f'<tbody>{_rows}</tbody>'
                 f'<tfoot><tr><td colspan="4">合計理論加工時間</td>'
                 f'<td class="r">{sum_h}h</td></tr></tfoot></table>'
-                f'<div class="cmp">実働 {WORK_H:.2f}h（7:55–17:05 −休憩65分）との比較</div>'
+                f'<div class="cmp">実働 {WORK_H:.2f}h（8:00–17:05 −休憩65分−清掃5分）との比較</div>'
                 f'</div>'
             )
+
+        if _pct_list:
+            _avg_pct_k = round(sum(_pct_list) / len(_pct_list))
+            _avg_html = (
+                f'<div class="avg-eff">過去1ヶ月'
+                f'（{_cutoff_k.strftime("%Y/%m/%d")}〜{_today_k.strftime("%Y/%m/%d")}）'
+                f'の平均効率：<span class="avg-val">{_avg_pct_k}%</span>'
+                f'　（対象 {len(_pct_list)}日）</div>'
+            )
+        else:
+            _avg_html = '<div class="avg-eff">過去1ヶ月分の加工記録がありません</div>'
 
         _eff_html = f"""<style>
           body{{margin:0;background:#1c1c1c;color:#e8e8e8;
                font-family:"Meiryo","Segoe UI",sans-serif;font-size:13px;}}
+          .avg-eff{{background:#222;border:1px solid #d97757;border-radius:8px;
+               margin:0 0 14px;padding:10px 12px;font-size:14px;color:#ccc;}}
+          .avg-eff .avg-val{{font-size:18px;font-weight:800;color:#d97757;}}
           .day{{background:#222;border:1px solid #333;border-radius:8px;
                margin:0 0 14px;padding:10px 12px;}}
           .day-h{{display:flex;align-items:center;justify-content:space-between;
@@ -3099,7 +3226,7 @@ if page_sel == "加工記録":
                    border-bottom:none;background:#1f1f1f;}}
           .cmp{{font-size:11px;color:#777;margin-top:5px;text-align:right;}}
         </style>
-        <div style="padding:2px 2px 8px;">{_cards}</div>"""
+        <div style="padding:2px 2px 8px;">{_avg_html}{_cards}</div>"""
         _kcomp2.html(_eff_html, height=640, scrolling=True)
         st.stop()
 
@@ -3376,7 +3503,7 @@ if page_sel == "帳票保管庫":
             if st.button("✕ 閉じる", key="ar_view_close", use_container_width=True):
                 st.session_state.pop("chohyo_view_pdf", None)
                 st.rerun()
-        _src = "http://localhost:8503/serve_pdf?p=" + _ulib.quote(str(_vp))
+        _src = "http://localhost:8513/serve_pdf?p=" + _ulib.quote(str(_vp))
         _viewer_html = """
 <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;color:#ccc;font-size:12px;">
   <button id="zoomout" style="background:#333;color:#fff;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;">−</button>
@@ -3843,6 +3970,7 @@ if act_add_schedule:
             added += 1
         # 書き込み
         nittei_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+        _gist_push_nittei(existing)  # 追加分をGistへ同期送信（非同期だと日程表ページ遷移時のpullに間に合わず消える）
         st.cache_data.clear()
         # 追加した案件＋重複スキップ案件のステータスを判定（取込済 or 加工済）
         final_nittei_map = {str(n["no"]): n for n in existing}
