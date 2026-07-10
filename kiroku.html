@@ -310,7 +310,7 @@
         <button class="kr-nav-btn" id="kr-nav-next" onclick="krNavTo(1)"  title="次のタスク">▶</button>
       </div>
       <button class="kr-sav-h" onclick="saveKiroku()">保存</button>
-      <button class="kr-comp-h" onclick="completeKiroku()">完了</button>
+      <button class="kr-comp-h" id="k2-comp-btn" onclick="completeKiroku()">完了</button>
     </div>
   </div>
 
@@ -725,6 +725,7 @@ function _fillKrForm(d) {
   _kanryoAt    = d?.kanryo_at || '';
   _updatedAt   = d?.updated_at || '';
   renderUpdatedLabel();
+  updateCompBtnLabel();
   const set = (id, v) => { const e = document.getElementById(id); if(e) e.value = (v ?? ''); };
   set('k2-nyuko-bi', d?.nyuko_bi);
   set('k2-kizai-f',  d?.kizai_furyou != null ? d.kizai_furyou : '');
@@ -1070,8 +1071,17 @@ function setKrHakoMismatchHighlight(on) {
   if(warnEl) warnEl.textContent = on ? '※箱数と一致しません' : '';
 }
 
-// 完了ボタン：不一致があればハイライトして知らせ、無ければ完了フラグを立てて保存
+// 完了ボタンの見た目を状態に応じて切り替え（初回＝完了／以降は修正）
+function updateCompBtnLabel() {
+  const btn = document.getElementById('k2-comp-btn');
+  if(btn) btn.textContent = _krCompleted ? '修正' : '完了';
+}
+
+// 完了／修正ボタン：不一致があればハイライトして知らせ、無ければ完了フラグを立てて保存
+// ※ サマリー（実所要時間の終点＝kanryo_at）への反映は「完了」押下（初回）のみ。
+//    完了後の「修正」押下は保存内容の更新だけ行い、所要時間の終点は動かさない。
 async function completeKiroku() {
+  const isFix = _krCompleted; // 押下時点で既に完了済み＝今回は「修正」としての保存
   updateKrSummary();
   if(_krQtyMismatch || _krHakoMismatch) {
     if(_krQtyMismatch)  setKrMismatchHighlight(true);
@@ -1095,9 +1105,10 @@ async function completeKiroku() {
   }
   sakushaEls.forEach(el => { el.style.border = ''; el.style.background = ''; });
   _krCompleted = true;
-  _kanryoAt = new Date().toISOString();  // 完了時刻を所要時間の終点に使う
+  if(!isFix) _kanryoAt = new Date().toISOString();  // 完了時刻を所要時間の終点に使う（初回のみ更新）
   await saveKiroku();
-  if(_summaryOpen) buildSummary();
+  updateCompBtnLabel();
+  if(!isFix && _summaryOpen) buildSummary(); // サマリーへの反映は初回「完了」時のみ
 }
 
 function _buildRecord() {

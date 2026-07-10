@@ -2227,6 +2227,41 @@ def save_status(d: dict):
     except Exception as e:
         return False, str(e)
 
+def _persist_order_status(orders: list):
+    """依頼書保管ページの起票FLG・ステータス（＋保留中の納品日編集）を即時保存する。
+    ページ内のどのボタンを押した時も呼び出し、「保存」ボタンの押し忘れによる
+    変更消失を防ぐための共通処理。"""
+    new_status = {}
+    for r in orders:
+        fp = normalize_path(r.get("file_path", ""))
+        if fp:
+            # 同一ファイル内の複数案件を区別するためページ番号もキーに含める
+            key = f"{fp}#{r.get('ページ', '')}"
+            new_status[key] = {
+                "status": r.get("ステータス", "新規"),
+                "flag":   bool(r.get("起票FLG")),
+                "no":     str(r.get("指図書No", "")),  # 日程ページからの逆引き用
+            }
+    ok, err = save_status(new_status)
+    # 納品日（ad）の保留編集があれば nittei.json にも反映
+    _ad_edits = st.session_state.get("_ad_edits", {})
+    if _ad_edits:
+        _np = BASE_DIR / "nittei.json"
+        if not _np.exists():
+            _np = Path(__file__).resolve().parent / "nittei.json"
+        try:
+            _nl = json.loads(_np.read_text(encoding="utf-8")) if _np.exists() else []
+            for _ne in _nl:
+                _no_k = str(_ne.get("no", "")).strip()
+                if _no_k in _ad_edits:
+                    _ne["ad"] = _ad_edits[_no_k]
+            _np.write_text(json.dumps(_nl, ensure_ascii=False, indent=2), encoding="utf-8")
+            st.session_state.pop("_ad_edits", None)
+            st.cache_data.clear()
+        except Exception as _e:
+            return ok, f"納品日保存エラー: {_e}"
+    return ok, err
+
 def load_seen_paths() -> set:
     """取り込み済み指示書の正規化パス一覧を返す"""
     if SEEN_JSON.exists():
@@ -2399,66 +2434,6 @@ def load_vfdb_full() -> pd.DataFrame:
     except Exception as e:
         st.error(f"VFDB2 全列読み込みエラー: {e}")
         return pd.DataFrame()
-    finally:
-        try:
-            if wb is not None:
-                wb.close()
-        except Exception:
-            pass
-        cleanup_tmp(tmp_path)
-
-# ══════════════════════════════════════════════════════════
-# 依頼書保管シート読み込み（1分キャッシュ）
-# ══════════════════════════════════════════════════════════
-@st.cache_data(ttl=60, show_spinner="依頼書保管 読み込み中...")
-def load_from_sgt() -> list:
-    if not SGT_PATH.exists():
-        return []
-    wb = None
-    tmp_path = None
-    try:
-        wb, tmp_path = open_workbook_safely(
-            SGT_PATH, keep_vba=True, data_only=True, read_only=True)
-        ws = wb["依頼書保管"]
-        records = []
-        for row in ws.iter_rows(min_row=5, values_only=True):
-            # A列（ファイルパス）が空になったら終了
-            if not row[0]:
-                break
-            # 列マッピング（0-indexed）
-            # A=0:パス  B=1:起票判定  C=2:転写判定
-            # D=3:指図書No  E=4:品目番号  F=5:品目コード  G=6:品名
-            # H=7:確定日程  I=8:単価  J=9:取数  K=10:?
-            # L=11:納品日  M=12:数量  N=13:梱包
-            # P=15:ページ  Q=16:切断工数  R=17:業態
-            # V=21:新規FLG  W=22:起票FLG
-            rec = {
-                "file_path"  : str(row[0]),
-                "ファイル名" : Path(str(row[0])).name if row[0] else "",
-                "起票判定"   : row[1],
-                "転写判定"   : row[2],
-                "指図書No"   : str(row[3]) if row[3] else "",
-                "品目番号"   : str(row[4]) if row[4] else "",
-                "品目コード" : str(row[5]) if row[5] else "",
-                "品名"       : str(row[6]) if row[6] else "",
-                "確定日程"   : row[7],
-                "単価"       : row[8],
-                "取数"       : row[9],
-                "納品日"     : row[11],
-                "数量"       : row[12],
-                "梱包"       : row[13],
-                "ページ"     : row[15],
-                "切断工数"   : row[16],
-                "業態"       : row[17],
-                "新規FLG"    : row[21],
-                "起票FLG"    : bool(row[22]) if row[22] else False,
-                "source"     : "sgt",
-            }
-            records.append(rec)
-        return records
-    except Exception as e:
-        st.error(f"依頼書保管 読み込みエラー: {e}")
-        return []
     finally:
         try:
             if wb is not None:
@@ -3684,13 +3659,11 @@ cnt_kakozu   = sum(1 for r in orders if r.get("ステータス") == "加工済")
 cnt_kitsu  = sum(1 for r in orders if r.get("起票FLG"))
 
 # ─── アクションバー 1行目 ───
-col_a, col_b, col_c, col_d, col_e, col_f = st.columns([2, 2, 2, 2, 2, 2])
+col_a, col_b, col_d, col_e, col_f = st.columns([2, 2, 2, 2, 2])
 with col_a:
     scan_btn = st.button("指示書取得", use_container_width=True)
 with col_b:
     save_btn = st.button("ステータス保存", use_container_width=True)
-with col_c:
-    reload_btn = st.button("SGT再読み込み", use_container_width=True)
 with col_d:
     all_check_btn = st.button("全チェック", use_container_width=True)
 with col_e:
@@ -3729,18 +3702,12 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ─── SGT 再読み込み ───
-if reload_btn:
-    st.cache_data.clear()
-    if "orders" in st.session_state:
-        del st.session_state["orders"]
-    st.rerun()
-
 # ─── 全チェック ───
 if all_check_btn:
     for r in orders:
         r["起票FLG"] = True
     st.session_state.orders = orders
+    _persist_order_status(orders)
 
 # ─── 新規を一括チェック ───
 if new_check_btn:
@@ -3750,6 +3717,7 @@ if new_check_btn:
             r["起票FLG"] = True
             cnt_new_checked += 1
     st.session_state.orders = orders
+    _persist_order_status(orders)
     st.toast(f"新規 {cnt_new_checked} 件にチェックを入れました") if cnt_new_checked else st.toast("新規の案件がありません")
     st.rerun()
 
@@ -3766,6 +3734,7 @@ if date_check_btn:
                 r["起票FLG"] = True
                 cnt_date_checked += 1
         st.session_state.orders = orders
+        _persist_order_status(orders)
         st.toast(f"{target_mmdd} 納品 {cnt_date_checked} 件にチェックを入れました") if cnt_date_checked else st.toast(f"{target_mmdd} に一致する案件がありません")
         st.rerun()
     st.rerun()
@@ -3775,6 +3744,7 @@ if all_uncheck_btn:
     for r in orders:
         r["起票FLG"] = False
     st.session_state.orders = orders
+    _persist_order_status(orders)
     st.rerun()
 
 # ─── 削除（チェック行） ───
@@ -3790,6 +3760,7 @@ if delete_btn:
         }
         save_deleted_keys(load_deleted_keys() | new_keys)
         st.session_state.orders = [r for r in orders if not r.get("起票FLG")]
+        _persist_order_status(st.session_state.orders)
         st.toast(f"{checked_count} 件を削除しました")
         st.rerun()
 
@@ -3860,38 +3831,11 @@ if scan_btn:
         st.session_state._scan_msgs.append({"type": "success", "text": msg})
     else:
         st.session_state._scan_msgs.append({"type": "warning", "text": f"貼り付け: {msg}"})
+    _persist_order_status(st.session_state.orders)
 
 # ─── ステータス保存 ───
 if save_btn:
-    new_status = {}
-    for r in orders:
-        fp = normalize_path(r.get("file_path", ""))
-        if fp:
-            # 同一ファイル内の複数案件を区別するためページ番号もキーに含める
-            key = f"{fp}#{r.get('ページ', '')}"
-            new_status[key] = {
-                "status": r.get("ステータス", "新規"),
-                "flag":   bool(r.get("起票FLG")),
-                "no":     str(r.get("指図書No", "")),  # 日程ページからの逆引き用
-            }
-    ok, err = save_status(new_status)
-    # 納品日（ad）変更があれば nittei.json にも反映
-    _ad_edits = st.session_state.get("_ad_edits", {})
-    if _ad_edits:
-        _np = BASE_DIR / "nittei.json"
-        if not _np.exists():
-            _np = Path(__file__).resolve().parent / "nittei.json"
-        try:
-            _nl = json.loads(_np.read_text(encoding="utf-8")) if _np.exists() else []
-            for _ne in _nl:
-                _no_k = str(_ne.get("no", "")).strip()
-                if _no_k in _ad_edits:
-                    _ne["ad"] = _ad_edits[_no_k]
-            _np.write_text(json.dumps(_nl, ensure_ascii=False, indent=2), encoding="utf-8")
-            st.session_state.pop("_ad_edits", None)
-            st.cache_data.clear()
-        except Exception as _e:
-            st.warning(f"納品日保存エラー: {_e}")
+    ok, err = _persist_order_status(orders)
     if ok:
         st.success("ステータスを保存しましたわ！")
     else:
@@ -3915,6 +3859,7 @@ if st.session_state._scan_msgs:
     with _mx:
         if st.button("×", key="clear_scan_msgs", help="閉じる"):
             st.session_state._scan_msgs = []
+            _persist_order_status(orders)
             st.rerun()
 
 st.divider()
@@ -3950,6 +3895,7 @@ with sc2:
     act_force_status = st.button("チェック行に適用", use_container_width=True)
 
 if act_print:
+    _persist_order_status(orders)
     st.info(f"［印刷］{len(checked)} 件が対象です（処理は未実装）。") if checked else st.warning("チェックの付いた案件がありません。")
 if act_add_schedule:
     if not checked:
@@ -4002,21 +3948,13 @@ if act_add_schedule:
                 r["ステータス"] = "加工済" if (qty > 0 and done >= qty) else "取込済"
         st.session_state.orders = orders
         # ステータスを即時保存
-        _new_status = {}
-        for _r in orders:
-            _fp = normalize_path(_r.get("file_path", ""))
-            if _fp:
-                _k = f"{_fp}#{_r.get('ページ', '')}"
-                _new_status[_k] = {
-                    "status": _r.get("ステータス", "新規"),
-                    "flag":   bool(_r.get("起票FLG")),
-                }
-        save_status(_new_status)
+        _persist_order_status(orders)
         msgs = []
         if added:   msgs.append(f"{added} 件を日程表に追加しました")
         if skipped: msgs.append(f"{skipped} 件は重複のためスキップ")
         st.toast(" / ".join(msgs) if msgs else "変更なし")
 if act_complete:
+    _persist_order_status(orders)
     if not checked:
         st.warning("チェックの付いた案件がありません。")
     else:
@@ -4225,16 +4163,7 @@ if act_complete:
                        + [r for r in orders if id(r) in done_ids]
                 st.session_state.orders = orders
                 # ステータスを即時保存（リロードで戻らないように）
-                _new_status = {}
-                for _r in orders:
-                    _fp = normalize_path(_r.get("file_path", ""))
-                    if _fp:
-                        _k = f"{_fp}#{_r.get('ページ', '')}"
-                        _new_status[_k] = {
-                            "status": _r.get("ステータス", "新規"),
-                            "flag":   bool(_r.get("起票FLG")),
-                        }
-                save_status(_new_status)
+                _persist_order_status(orders)
             else:
                 st.error(f"PDF結合失敗: {msg}")
                 st.info(f"個別 PDF は {out_dir} に保存済みです")
@@ -4246,6 +4175,7 @@ if act_complete:
                 for e in errors:
                     st.write(e)
 if act_open:
+    _persist_order_status(orders)
     if checked:
         # 1ファイルに複数案件が入っている場合、同じファイルを何度も
         # 開かないようパスで重複除去する（順序は保つ）。
@@ -4279,17 +4209,7 @@ if act_force_status:
         for r in checked:
             r["ステータス"] = force_status_sel
         st.session_state.orders = orders
-        # 即時保存
-        _new_status = {}
-        for _r in orders:
-            _fp = normalize_path(_r.get("file_path", ""))
-            if _fp:
-                _k = f"{_fp}#{_r.get('ページ', '')}"
-                _new_status[_k] = {
-                    "status": _r.get("ステータス", "新規"),
-                    "flag":   bool(_r.get("起票FLG")),
-                }
-        save_status(_new_status)
+        _persist_order_status(orders)
         st.toast(f"{len(checked)} 件を「{force_status_sel}」に変更しました")
         st.rerun()
 
