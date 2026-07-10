@@ -304,7 +304,7 @@ let NITTEI_ROWS = [];
 const VFDB_ROWS = [];
 
 // kakou_kiroku サーバーポート
-const KAKOU_PORT = 8503;
+const KAKOU_PORT = 8513;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ユーティリティ
@@ -694,7 +694,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusEl = document.getElementById('status-msg');
   let kakouList = [];
 
-  // kakou_kiroku をポート8503から取得（3秒タイムアウト付き）
+  // kakou_kiroku をポート8513から取得（3秒タイムアウト付き）
   try {
     const _ac = new AbortController();
     const _tid = setTimeout(() => _ac.abort(), 3000);

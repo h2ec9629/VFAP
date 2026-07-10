@@ -90,7 +90,7 @@ tbody td.db-changed {
 <body>
 <div class="db-toolbar">
   <span class="db-toolbar-title">📋 品目データベース</span>
-  <button class="db-toolbar-btn" onclick="window.open('http://localhost:8503/ondankan','_blank','noopener')">🌡 温度換算表</button>
+  <button class="db-toolbar-btn" onclick="window.open('http://localhost:8513/ondankan','_blank','noopener')">🌡 温度換算表</button>
 </div>
 <div class="wrap"><table id="t"></table></div>
 <script>
@@ -129,7 +129,7 @@ async function saveChanges() {
   saveBtn.disabled = true;
   saveBtn.textContent = '保存中…';
   try {
-    const res = await fetch('http://localhost:8503/save_db', {
+    const res = await fetch('http://localhost:8513/save_db', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changes })

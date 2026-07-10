@@ -854,7 +854,7 @@ async function saveRows(){
   try {
     await _loadKakouBikoMap(); // 保存直前にbikoを最新化
     const payload = { rows: rows, gantt_render: computeGanttRender() };
-    const resp = await fetch('http://localhost:8502/', {
+    const resp = await fetch('http://localhost:8512/', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
@@ -936,7 +936,7 @@ function closeConfirm(){
 // ══════════════════════════════════════════════
 // 加工記録 別窓化 v3
 // ══════════════════════════════════════════════
-const KAKOU_PORT    = 8503;
+const KAKOU_PORT    = 8513;
 const KR_FIXED_ROWS = 10;
 const KR_LOT_ROWS   = 5;
 const KR_MAX_COL    = 4;
