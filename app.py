@@ -1226,10 +1226,14 @@ def detect_jushi_dir(base: Path) -> Path:
     if env_dir:
         candidates.append(Path(env_dir))
 
-    # app.py と同じフォルダの 樹脂指示書_クリーン を最優先
+    # OneDrive\work\SGT_cloud\input\樹脂指示書_クリーン を最優先
+    _od_work2 = detect_onedrive_work()
+    if _od_work2:
+        candidates.append(_od_work2 / "SGT_cloud" / "input" / "樹脂指示書_クリーン")
+
+    # app.py と同じフォルダの 樹脂指示書_クリーン
     candidates.append(Path(__file__).resolve().parent / "樹脂指示書_クリーン")
 
-    _od_work2 = detect_onedrive_work()
     if _od_work2:
         candidates.append(_od_work2 / "VFAP-cloud" / "input" / "樹脂指示書")
         candidates.append(_od_work2 / "SGT_cloud" / "input" / "樹脂指示書")
