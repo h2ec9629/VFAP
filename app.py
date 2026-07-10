@@ -3130,7 +3130,7 @@ if page_sel == "加工記録":
                     "hon": hon, "kosuu": kosuu, "hours": hours,
                 })
 
-        # 対象期間：過去1ヶ月（今日を含む直近1ヶ月分の加工日のみ表示）
+        # 対象期間：過去1ヶ月（当日は作業途中のため集計対象から除外）
         _today_k = datetime.now().date()
         if _today_k.month == 1:
             _cutoff_k = _today_k.replace(year=_today_k.year - 1, month=12)
@@ -3139,6 +3139,7 @@ if page_sel == "加工記録":
             _prev_m_k = _today_k.month - 1
             _last_day_k = _cal_k.monthrange(_today_k.year, _prev_m_k)[1]
             _cutoff_k = _today_k.replace(month=_prev_m_k, day=min(_today_k.day, _last_day_k))
+        _cutoff_week_k = _today_k - timedelta(days=7)  # 週間集計：直近7日（当日除く）
 
         def _lot_date_k(lot):
             m = _re_k.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', lot)
@@ -3152,14 +3153,17 @@ if page_sel == "加工記録":
 
         _cards = ""
         _pct_list = []
+        _week_pct_list = []
         for lot in sorted(_by_day, reverse=True):
             _ld = _lot_date_k(lot)
-            if _ld is None or _ld < _cutoff_k or _ld > _today_k:
-                continue  # 過去1ヶ月の範囲外（or 日付不明）はスキップ
+            if _ld is None or _ld < _cutoff_k or _ld >= _today_k:
+                continue  # 過去1ヶ月の範囲外・当日・日付不明はスキップ
             items = _by_day[lot]
             sum_h = round(sum(it["hours"] for it in items if it["hours"] is not None), 1)
             pct = round(sum_h / WORK_H * 100) if WORK_H > 0 else 0
             _pct_list.append(pct)
+            if _ld >= _cutoff_week_k:
+                _week_pct_list.append(pct)
             if   pct >= 100: _cls = "ef-blue"
             elif pct >= 80:  _cls = "ef-green"
             elif pct >= 50:  _cls = "ef-yellow"
@@ -3188,11 +3192,23 @@ if page_sel == "加工記録":
                 f'</div>'
             )
 
+        _yesterday_k = _today_k - timedelta(days=1)
+        if _week_pct_list:
+            _avg_pct_week_k = round(sum(_week_pct_list) / len(_week_pct_list))
+            _avg_week_html = (
+                f'<div class="avg-eff">直近1週間'
+                f'（{_cutoff_week_k.strftime("%Y/%m/%d")}〜{_yesterday_k.strftime("%Y/%m/%d")}）'
+                f'の平均効率：<span class="avg-val">{_avg_pct_week_k}%</span>'
+                f'　（対象 {len(_week_pct_list)}日）</div>'
+            )
+        else:
+            _avg_week_html = '<div class="avg-eff">直近1週間分の加工記録がありません</div>'
+
         if _pct_list:
             _avg_pct_k = round(sum(_pct_list) / len(_pct_list))
             _avg_html = (
                 f'<div class="avg-eff">過去1ヶ月'
-                f'（{_cutoff_k.strftime("%Y/%m/%d")}〜{_today_k.strftime("%Y/%m/%d")}）'
+                f'（{_cutoff_k.strftime("%Y/%m/%d")}〜{_yesterday_k.strftime("%Y/%m/%d")}）'
                 f'の平均効率：<span class="avg-val">{_avg_pct_k}%</span>'
                 f'　（対象 {len(_pct_list)}日）</div>'
             )
@@ -3226,7 +3242,7 @@ if page_sel == "加工記録":
                    border-bottom:none;background:#1f1f1f;}}
           .cmp{{font-size:11px;color:#777;margin-top:5px;text-align:right;}}
         </style>
-        <div style="padding:2px 2px 8px;">{_avg_html}{_cards}</div>"""
+        <div style="padding:2px 2px 8px;">{_avg_week_html}{_avg_html}{_cards}</div>"""
         _kcomp2.html(_eff_html, height=640, scrolling=True)
         st.stop()
 
