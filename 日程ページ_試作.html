@@ -24,6 +24,7 @@
   header button:hover{background:#333;border-color:#555;}
   header button.primary{background:#e86a00;color:#fff;font-weight:700;border-color:#e86a00;}
   header button.primary:hover{background:#ff8020;}
+  header .eff-compact{font-size:13px;font-weight:700;color:var(--accent);white-space:nowrap;}
   .legend{display:flex;gap:14px;font-size:13px;color:var(--sub);padding:6px 16px;background:#1a1a1a;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;}
   .legend i{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:4px;}
   /* シミュレーショントグル */
@@ -123,9 +124,6 @@
   /* 納品日当日まで作業が続く → ほんのり黄色ハイライト */
   tr.row.samedaywork-risk td.left{background:#2e2a10 !important;}
   tr.row.samedaywork-risk td.cell{background:rgba(240,192,64,0.10);}
-  /* 納品日ハイライト（日付フィルター）— risk系より後ろで !important → 必ず上書き */
-  tr.row.deliv-match td.left{background:#1a3020 !important;box-shadow:inset 3px 0 0 #2e9e5b;}
-  tr.row.deliv-match td.cell{background:rgba(46,158,91,0.18);}
   /* 行選択 — 最優先 */
   tr.row.selected td.left{background:#1a2d45 !important;}
   tr.row.selected td.cell{background:rgba(80,140,220,0.10);}
@@ -381,6 +379,7 @@
   <span class="sub" id="samedaywork-warn" style="display:none;color:#f0c040;font-weight:700;font-size:16px;animation:deliv-blink 1.6s ease-in-out infinite;"></span>
   <div class="btns">
     <button id="sort-due-btn" onclick="sortPicksByDue()" style="display:none;background:#2e9e5b;color:#fff;border-color:#2e9e5b;">⇅ 期限でソート</button>
+    <span id="eff-compact" class="eff-compact">週間効率：0％　月間効率：0％</span>
     <button onclick="autoAssignDenno()" style="background:#5a3800;color:#c88040;border-color:#c88040;" title="月ごとに納品日順で伝票Noを1から振り直す（7件で次のNo）">採番</button>
 <button class="primary" id="save-btn" onclick="saveRows()" style="background:#b86040;color:#fff;border-color:#b86040;">保存</button>
   </div>
@@ -397,13 +396,6 @@
   <span class="sim-area">
     <label class="sim-sw"><input type="checkbox" id="sim4-chk" onchange="onSim4Change(this.checked)"><span class="sim-track"><span class="sim-thumb"></span></span><span class="sim-lbl">+4h</span></label>
     <label class="sim-sw"><input type="checkbox" id="sim8-chk" onchange="onSim8Change(this.checked)"><span class="sim-track"><span class="sim-thumb"></span></span><span class="sim-lbl">+8h(1日)</span></label>
-  </span>
-  <span class="sim-area" style="margin-left:auto;">
-    <span style="font-size:12px;color:var(--sub);white-space:nowrap;">納品日</span>
-    <input type="text" id="deliv-filter-input" placeholder="MM/DD" maxlength="5"
-      style="width:62px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:5px;color:#e8e8e8;font-size:13px;padding:3px 6px;text-align:center;outline:none;">
-    <button onclick="setDelivFilterToday()" style="font-size:12px;padding:3px 8px;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:5px;color:#aaa;cursor:pointer;white-space:nowrap;">今日</button>
-    <button id="deliv-filter-clear" onclick="clearDelivFilter()" style="display:none;font-size:12px;padding:3px 8px;background:#2a3020;border:1px solid #2e9e5b;border-radius:5px;color:#2e9e5b;cursor:pointer;">✕ クリア</button>
   </span>
 </div>
 <div class="wrap">
@@ -725,7 +717,6 @@ function buildBody(){
   attachContextMenu();
   applySelection();
   applyPicks();
-  applyDelivFilter();
   attachColHover();
   const warnEl=document.getElementById('deliv-warn');
   if(warnEl){
@@ -764,33 +755,6 @@ function attachColHover(){
 
 let selectedNo=null, selectedDay=null;
 
-// ── 納品日ハイライトフィルター ──
-let delivFilterDate='';
-function applyDelivFilter(){
-  const f=delivFilterDate.trim();
-  document.querySelectorAll('tr.row').forEach(tr=>{
-    const r=rows[+tr.dataset.idx];
-    if(!r)return;
-    tr.classList.toggle('deliv-match', !!f && r.ad===f);
-  });
-  const clearBtn=document.getElementById('deliv-filter-clear');
-  if(clearBtn) clearBtn.style.display=f?'':'none';
-}
-function clearDelivFilter(){
-  delivFilterDate='';
-  const inp=document.getElementById('deliv-filter-input');
-  if(inp) inp.value='';
-  applyDelivFilter();
-}
-function setDelivFilterToday(){
-  const t=new Date();
-  const mm=String(t.getMonth()+1).padStart(2,'0');
-  const dd=String(t.getDate()).padStart(2,'0');
-  delivFilterDate=mm+'/'+dd;
-  const inp=document.getElementById('deliv-filter-input');
-  if(inp) inp.value=delivFilterDate;
-  applyDelivFilter();
-}
 document.addEventListener('DOMContentLoaded',()=>{
   // ヘッダーの「〇月度」を当月で自動表示
   const titleEl=document.getElementById('page-title');
@@ -800,16 +764,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     wrapEl.addEventListener('pointerdown',()=>wrapEl.classList.add('no-select'));
     document.addEventListener('pointerup',()=>wrapEl.classList.remove('no-select'));
   }
-  const inp=document.getElementById('deliv-filter-input');
-  if(!inp)return;
-  inp.addEventListener('input',e=>{
-    let v=e.target.value.replace(/[^0-9/]/g,'');
-    // 数字4桁→自動スラッシュ挿入（例:0612→06/12）
-    if(/^\d{4}$/.test(v)) v=v.slice(0,2)+'/'+v.slice(2);
-    if(v!==e.target.value) e.target.value=v;
-    delivFilterDate=v;
-    applyDelivFilter();
-  });
 });
 
 function applySelection(){

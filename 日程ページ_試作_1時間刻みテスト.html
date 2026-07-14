@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日程ページ 試作 — 当日/翌日 1時間刻みテスト</title>
+<style>
+  :root{
+    --bg:#1c1c1c; --panel:#222; --line:#333; --ink:#e8e8e8; --sub:#888;
+    --head:#161616; --headtxt:#fff; --proc2:#7a8490; --proc1:#7ba7d9;
+    --mat:#f3d518; --deliv:#2e9e5b; --due:#d23b3b;
+    --accent:#d97757; --accent-hi:#e89070;
+    --bar-h:14px; --bar-top:8px;
+    --row-h:30px; --left-w:560px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;font-family:"游ゴシック","Yu Gothic",sans-serif;background:var(--bg);color:var(--ink);}
+  header{background:var(--head);color:var(--headtxt);padding:8px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid #2a2a2a;}
+  header h1{font-size:18px;margin:0;font-weight:600;}
+  header .sub{font-size:12px;opacity:.6;}
+  .legend{display:flex;gap:14px;font-size:13px;color:var(--sub);padding:6px 16px;background:#1a1a1a;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center;}
+  .legend i{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:4px;}
+  .legend .note{color:var(--accent-hi);font-weight:600;}
+  .wrap{overflow-x:scroll;overflow-y:auto;position:relative;height:calc(100% - 96px);}
+  table.gantt{border-collapse:separate;border-spacing:0;min-width:max-content;}
+  thead th{position:sticky;background:var(--head);color:var(--headtxt);font-weight:600;white-space:nowrap;}
+  thead tr.r1 th{top:0;z-index:10;font-size:13px;border-right:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;padding:3px 4px;height:26px;}
+  thead tr.r1 th.day.hourly{background:#2a2210;color:#f0c860;}
+  thead tr.r1 th.hr-badge{}
+  .hr-badge{display:inline-block;margin-left:4px;font-size:9px;font-weight:700;background:#4a3a10;color:#f0c860;border-radius:3px;padding:0 4px;vertical-align:1px;}
+  thead tr.r2 th{top:26px;z-index:10;font-size:10px;font-weight:400;opacity:.75;border-right:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;padding:2px 0;height:16px;}
+  thead tr.r2 th.hcell{border-right:1px dashed #3a3a3a;background:#20200f;}
+  thead th.corner{position:sticky;left:0;top:0;z-index:11;text-align:left;padding:0;min-width:var(--left-w);background:#161616;}
+  #corner-front{position:sticky;top:0;left:0;z-index:9999;width:var(--left-w);height:42px;background:#161616;overflow:hidden;margin-bottom:-42px;pointer-events:none;}
+  #corner-front .hdr-left{display:flex;align-items:center;height:100%;gap:0;overflow:hidden;}
+  .fld.hdr{color:rgba(255,255,255,.7);background:transparent !important;font-size:12px;font-weight:600;}
+  td.left{position:sticky;left:0;z-index:12;background:var(--panel);border-right:2px solid var(--line);border-bottom:1px solid var(--line);min-width:var(--left-w);max-width:var(--left-w);padding:0;}
+  .leftinner{display:flex;align-items:stretch;gap:0;height:var(--row-h);overflow:hidden;}
+  .fld{flex:0 0 auto;display:flex;flex-direction:column;justify-content:center;padding:2px 6px;font-size:13px;line-height:1.2;border-right:1px solid #333;overflow:hidden;}
+  .fld.no{flex:0 0 62px;color:var(--sub);font-weight:600;}
+  .fld.nm{flex:0 0 214px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .fld.done{flex:0 0 66px;text-align:right;font-weight:700;}
+  .fld.done small{font-size:10px;color:var(--sub);font-weight:400;}
+  .fld.hrs{flex:0 0 74px;flex-direction:row;align-items:center;gap:3px;font-size:12px;}
+  .fld.hrs b{font-size:13px;}
+  .fld.hrs .cum{font-size:10px;color:var(--proc1);}
+  .dchip{cursor:default;text-align:center;flex:0 0 48px;font-size:12px;}
+  .dchip.mat{color:#f3d518;}
+  .dchip.deliv{color:#2e9e5b;}
+  .dchip.due{color:#d23b3b;}
+  input.dchip{background:transparent;border:none;outline:none;font-family:inherit;padding:2px 0;cursor:text;width:48px;min-width:0;box-sizing:border-box;}
+  input.dchip:focus{background:#1a2030;border-radius:3px;}
+  input.dchip::placeholder{font-size:11px;opacity:.45;}
+  td.cell{height:var(--row-h);border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0;position:relative;z-index:0;}
+  td.cell.dayend{border-right:2px solid #444;}
+  /* 当日/翌日の境界を強調 */
+  th.today-boundary{border-right:3px solid var(--accent) !important;}
+  td.cell.today-boundary{border-right:3px solid var(--accent) !important;}
+  td.cell.hcell{border-right:1px dashed #333;background:rgba(240,200,96,0.03);}
+  .bar{position:absolute;top:var(--bar-top);height:var(--bar-h);border-radius:3px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;overflow:hidden;z-index:3;}
+  .mark{position:absolute;top:var(--bar-top);height:var(--bar-h);border-radius:3px;opacity:.85;z-index:3;}
+  .mark.mat{background:var(--mat);}
+  .mark.deliv{background:var(--deliv);}
+  .mark.due{background:var(--due);}
+  tr.row:hover td.left{background:#382d23;}
+  tr.row:hover td.cell{background:rgba(255,140,40,0.10);}
+  td.cell.col-hl{background:rgba(255,140,40,0.14) !important;}
+  th.day.col-hl{background:rgba(255,140,40,0.20) !important;}
+  tr.row.deliv-risk td.left{background:#3b2626 !important;}
+  tr.row.deliv-risk td.cell{background:rgba(210,59,59,0.10);}
+  tr.row.samedaywork-risk td.left{background:#2e2a10 !important;}
+  tr.row.samedaywork-risk td.cell{background:rgba(240,192,64,0.10);}
+  ::-webkit-scrollbar{width:15px;height:15px;}
+  ::-webkit-scrollbar-track{background:#1C1C1C;}
+  ::-webkit-scrollbar-thumb{background:var(--accent);border-radius:6px;border:2px solid #1C1C1C;}
+  ::-webkit-scrollbar-thumb:hover{background:var(--accent-hi);}
+</style>
+</head>
+<body>
+<header>
+  <h1>切断加工日程表 — 試作（当日/翌稼働日だけ1時間刻み）</h1>
+  <span class="sub" id="page-sub"></span>
+</header>
+<div class="legend">
+  <span><i style="background:var(--proc2)"></i>工程（二人）</span>
+  <span><i style="background:var(--proc1)"></i>工程（一人・灯具）</span>
+  <span><i style="background:var(--mat)"></i>材料支給</span>
+  <span><i style="background:var(--deliv)"></i>納品</span>
+  <span><i style="background:var(--due)"></i>期限</span>
+  <span class="note">黄色い列＝当日・翌稼働日（1時間刻み）／それ以降は通常の4時間刻み</span>
+</div>
+<div class="wrap">
+  <div id="corner-front"></div>
+  <table class="gantt">
+    <thead><tr class="r1" id="head1"></tr><tr class="r2" id="head2"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+<script>
+// ── 試作：当日・翌稼働日だけ 1日=8マス(1hずつ)、それ以降は通常の 1日=2マス(4hずつ) ──
+// 土日は稼働日から除外。「翌日」は暦上の翌日ではなく「次の稼働日」として扱う（土日祝はスキップ）。
+const CW=30, HRS_PER_SLOT=4;           // 通常4hマスは30px固定
+const NORMAL_PXH=CW/HRS_PER_SLOT;      // 通常日：1hあたりpx（7.5px）
+const HOURLY_PXH=14;                   // 当日・翌稼働日：1hあたりpx（ここだけ変更可）
+const WD=['日','月','火','水','木','金','土'];
+function fmtMD(d){return String(d.getMonth()+1).padStart(2,'0')+'/'+String(d.getDate()).padStart(2,'0');}
+function buildDays(n){
+  const out=[]; const d=new Date();
+  while(out.length<n){
+    if(d.getDay()!==0 && d.getDay()!==6) out.push([fmtMD(d),WD[d.getDay()]]);
+    d.setDate(d.getDate()+1);
+  }
+  return out;
+}
+const days=buildDays(10);
+const HOURLY_DAYS=2; // 先頭2日＝当日・翌稼働日
+
+let _cum=0, _cumPx=0;
+const dayMeta=days.map((d,i)=>{
+  const hourly=i<HOURLY_DAYS;
+  const colHours=hourly?1:HRS_PER_SLOT;
+  const colCount=hourly?8:2;
+  const pxh=hourly?HOURLY_PXH:NORMAL_PXH; // この日の1hあたりpx（当日/翌稼働日と通常日で別の縮尺）
+  const startHour=_cum, startPx=_cumPx;
+  const dayHours=colHours*colCount; // 1日=8h固定（粒度に関わらず）
+  _cum+=dayHours; _cumPx+=dayHours*pxh;
+  return{date:d[0],wd:d[1],hourly,colHours,colCount,pxh,startHour,startPx,dayHours};
+});
+function findDayMeta(mmdd){return dayMeta.find(x=>x.date===mmdd);}
+// 縮尺が日によって違うので、累計時間→pxは日ごとに区間計算する（通常日/1h日をまたいでもズレない）
+function hourToPx(h){
+  for(const dm of dayMeta){
+    if(h<=dm.startHour+dm.dayHours) return dm.startPx+(h-dm.startHour)*dm.pxh;
+  }
+  const last=dayMeta[dayMeta.length-1];
+  return last.startPx+(h-last.startHour)*last.pxh; // 範囲外は最終日の縮尺で延長
+}
+
+document.getElementById('page-sub').textContent=
+  '本日 '+days[0][0]+'('+days[0][1]+') ／ 翌稼働日 '+days[1][0]+'('+days[1][1]+')';
+
+// サンプル案件（1本ラインの順送りタイムライン。前案件終了＝次の開始）
+let rows=[
+  {no:"900001",nm:"試作Aブラケット",qty:100,done:0,hours:1.5,ac:"",ad:"",af:""},
+  {no:"900002",nm:"試作Bカバー",qty:100,done:0,hours:2.0,ac:"",ad:"",af:""},
+  {no:"900003",nm:"試作C治具",qty:100,done:0,hours:1.0,ac:"",ad:"",af:""},
+  {no:"900004",nm:"試作D部品",qty:100,done:0,hours:3.5,ac:days[0][0],ad:days[0][0],af:""},
+  {no:"900005",nm:"試作E部品",qty:100,done:0,hours:2.5,ac:"",ad:"",af:""},
+  {no:"900006",nm:"試作F部品",qty:100,done:0,hours:1.5,ac:"",ad:"",af:""},
+  {no:"900007",nm:"灯具カバー G部品",qty:100,done:0,hours:4.0,ac:"",ad:"",af:days[1][0]},
+  {no:"900008",nm:"試作H部品",qty:100,done:0,hours:4.0,ac:"",ad:days[2]?days[2][0]:"",af:""},
+  {no:"900009",nm:"灯具カバー I部品",qty:100,done:0,hours:4.0,ac:"",ad:"",af:""},
+  {no:"900010",nm:"試作J部品",qty:100,done:0,hours:8.0,ac:"",ad:"",af:days[3]?days[3][0]:""}
+];
+
+function pct(r){return r.qty?Math.round(r.done/r.qty*100):0;}
+
+function buildHead(){
+  document.getElementById('corner-front').innerHTML=`<div class="hdr-left">
+    <span class="fld no hdr">明細No</span>
+    <span class="fld nm hdr">品名</span>
+    <span class="fld done hdr">進捗</span>
+    <span class="fld hrs hdr">工数/累計</span>
+    <span class="dchip hdr">引取</span>
+    <span class="dchip hdr">納品</span>
+    <span class="dchip hdr">期限</span>
+  </div>`;
+  let h1=`<th class="corner" rowspan="2"></th>`,h2="";
+  let cum=0;
+  dayMeta.forEach((dm,di)=>{
+    const isToday=(di===0); // 当日＝翌日との境界を強調する側
+    h1+=`<th class="day${dm.hourly?' hourly':''}${isToday?' today-boundary':''}" colspan="${dm.colCount}">${dm.date}<small>(${dm.wd})</small>${dm.hourly?'<span class="hr-badge">1h刻み</span>':''}</th>`;
+    for(let i=0;i<dm.colCount;i++){
+      cum+=dm.colHours;
+      const w=dm.colHours*dm.pxh;
+      const isLast=(i===dm.colCount-1);
+      h2+=`<th style="width:${w}px;min-width:${w}px;" class="${dm.hourly?'hcell':''}${isToday&&isLast?' today-boundary':''}">${cum}</th>`;
+    }
+  });
+  document.getElementById('head1').innerHTML=h1;
+  document.getElementById('head2').innerHTML=h2;
+}
+
+function buildBody(){
+  const tb=document.getElementById('body');tb.innerHTML="";
+  let cumH=0;
+  let delivRiskCount=0, sameDayCount=0;
+  rows.forEach((r,idx)=>{
+    const p=pct(r);
+    const pct100=(r.qty>0&&r.done>=r.qty);
+    const remaining=pct100?0:r.hours;
+    const startH=cumH, endH=cumH+remaining; cumH=endH;
+    const tr=document.createElement('tr');tr.className="row";tr.dataset.idx=idx;tr.dataset.endh=endH;
+    let cells=`<td class="left"><div class="leftinner">
+      <span class="fld no">${r.no}</span>
+      <span class="fld nm">${r.nm}</span>
+      <span class="fld done">${r.done}<small> ${p}%</small></span>
+      <span class="fld hrs"><b>${remaining.toFixed(1)}</b><span class="cum">/${endH.toFixed(1)}</span></span>
+      <input class="dchip mat" data-idx="${idx}" data-field="ac" value="${r.ac||''}" placeholder="MM/DD">
+      <input class="dchip deliv" data-idx="${idx}" data-field="ad" value="${r.ad||''}" placeholder="MM/DD">
+      <input class="dchip due" data-idx="${idx}" data-field="af" value="${r.af||''}" placeholder="MM/DD">
+    </div></td>`;
+    dayMeta.forEach((dm,di)=>{
+      for(let i=0;i<dm.colCount;i++){
+        const w=dm.colHours*dm.pxh;
+        const isLast=(i===dm.colCount-1);
+        const isToday=(di===0);
+        cells+=`<td class="cell${isLast?' dayend':''}${dm.hourly?' hcell':''}${isToday&&isLast?' today-boundary':''}" style="width:${w}px;min-width:${w}px;" data-day="${di}" data-i="${i}"></td>`;
+      }
+    });
+    tr.innerHTML=cells;tb.appendChild(tr);
+    const fc=tr.querySelectorAll('td.cell')[0];
+    if(!pct100){
+      const bar=document.createElement('div');bar.className="bar";
+      const left=hourToPx(startH), right=hourToPx(endH);
+      bar.style.left=(left+1)+"px";
+      bar.style.width=Math.max(right-left-2,4)+"px";
+      bar.style.background=r.nm.includes('灯具')?"var(--proc1)":"var(--proc2)";
+      fc.appendChild(bar);
+    }
+    // hourInDay: その日の何時間目か（1=1時間目）。1マス分(1h)の幅でピンポイント表示
+    const addMark=(mmdd,cls,hourInDay)=>{
+      const dm=findDayMeta(mmdd);if(!dm)return;
+      const s=dm.startHour+(hourInDay-1);
+      const left=hourToPx(s), right=hourToPx(s+1);
+      const m=document.createElement('div');m.className="mark "+cls;
+      m.style.left=(left+1)+"px";m.style.width=Math.max(right-left-2,3)+"px";fc.appendChild(m);
+    };
+    addMark(r.ac,"mat",6);    // 引取：6時間目
+    addMark(r.ad,"deliv",4);  // 納品：4時間目
+    addMark(r.af,"due",5);    // 期限：5時間目
+    // 納品日を追い越していないかの簡易警告（当日/翌稼働日=1h列でも8h/日基準は同じ）
+    const dmAd=findDayMeta(r.ad);
+    if(!pct100 && dmAd){
+      const amStart=dmAd.startHour, pmStart=dmAd.startHour+4;
+      if(endH>pmStart){tr.classList.add('deliv-risk');delivRiskCount++;}
+      else if(endH>amStart){tr.classList.add('samedaywork-risk');sameDayCount++;}
+    }
+  });
+  attachColHover();
+}
+
+// 入力欄からフォーカスを外さずにマーカー位置だけ再計算（工数/累計はac/ad/afの影響を受けないので再計算不要）
+function refreshRowMarkers(idx){
+  const tr=document.querySelector(`tr.row[data-idx="${idx}"]`);
+  if(!tr)return;
+  const r=rows[idx];
+  const fc=tr.querySelectorAll('td.cell')[0];
+  fc.querySelectorAll('.mark').forEach(m=>m.remove());
+  const addMark=(mmdd,cls,hourInDay)=>{
+    const dm=findDayMeta(mmdd);if(!dm)return;
+    const s=dm.startHour+(hourInDay-1);
+    const left=hourToPx(s), right=hourToPx(s+1);
+    const m=document.createElement('div');m.className="mark "+cls;
+    m.style.left=(left+1)+"px";m.style.width=Math.max(right-left-2,3)+"px";fc.appendChild(m);
+  };
+  addMark(r.ac,"mat",6);
+  addMark(r.ad,"deliv",4);
+  addMark(r.af,"due",5);
+  tr.classList.remove('deliv-risk','samedaywork-risk');
+  const pct100=(r.qty>0&&r.done>=r.qty);
+  const endH=+tr.dataset.endh;
+  const dmAd=findDayMeta(r.ad);
+  if(!pct100 && dmAd){
+    const amStart=dmAd.startHour, pmStart=dmAd.startHour+4;
+    if(endH>pmStart) tr.classList.add('deliv-risk');
+    else if(endH>amStart) tr.classList.add('samedaywork-risk');
+  }
+}
+
+function attachColHover(){
+  document.querySelectorAll('td.cell').forEach(td=>{
+    td.addEventListener('mouseenter',()=>{
+      const k=td.dataset.day+'-'+td.dataset.i;
+      document.querySelectorAll('td.cell').forEach(c=>c.classList.toggle('col-hl',(c.dataset.day+'-'+c.dataset.i)===k));
+    });
+    td.addEventListener('mouseleave',()=>{
+      document.querySelectorAll('td.cell').forEach(c=>c.classList.remove('col-hl'));
+    });
+  });
+}
+
+// 引取・納品・期限：MM/DDで直接編集可（数字4桁は自動でスラッシュ挿入）。確定(blur/Enter)で再描画
+document.getElementById('body').addEventListener('input',e=>{
+  const el=e.target;
+  if(!el.classList.contains('dchip'))return;
+  let v=el.value.replace(/[^0-9/]/g,'');
+  if(/^\d{4}$/.test(v)) v=v.slice(0,2)+'/'+v.slice(2);
+  if(v!==el.value) el.value=v;
+  rows[+el.dataset.idx][el.dataset.field]=v.trim();
+  refreshRowMarkers(+el.dataset.idx); // 入力途中でもマーカー位置を即反映（フォーカスは外さない）
+});
+document.getElementById('body').addEventListener('change',e=>{
+  const el=e.target;
+  if(!el.classList.contains('dchip'))return;
+  rows[+el.dataset.idx][el.dataset.field]=el.value.trim();
+  buildBody(); // 確定時は全体を再構築して整合性を取る
+});
+document.getElementById('body').addEventListener('keydown',e=>{
+  if(e.key==='Enter' && e.target.classList.contains('dchip')) e.target.blur();
+});
+
+buildHead();
+buildBody();
+</script>
+</body>
+</html>

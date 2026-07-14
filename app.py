@@ -219,6 +219,87 @@ def _load_kakou_dict() -> dict:
 
 
 
+def _calc_kakou_eff_summary():
+    """加工日別 稼働効率の週間・月間平均を計算する（当日は作業途中のため対象外）。
+    日程ページのヘッダー表示用。戻り値: (week_pct, month_pct)。データが無ければ None。"""
+    try:
+        _all_e = _load_all_cases(BASE_DIR)
+    except Exception:
+        return None, None
+    _all_e = [r for r in _all_e if r.get("kanryo") is True]
+    if not _all_e:
+        return None, None
+
+    import re as _re_e, unicodedata as _ud_e, calendar as _cal_e
+
+    WORK_MIN_E = 475.0
+    WORK_H_E   = WORK_MIN_E / 60.0
+
+    _spec_e = build_vfdb_spec_by_name()
+    def _nm_e(s):
+        return _re_e.sub(r"\s+", "", _ud_e.normalize("NFKC", str(s or "")))
+
+    _by_day_e: dict = {}
+    for rec in _all_e:
+        spec = _spec_e.get(_nm_e(rec.get("hinmei")), {})
+        try:
+            kosuu = float(spec.get("kosuu"))
+        except Exception:
+            kosuu = None
+        try:
+            irisu = int(float(spec.get("irisu", 0) or 0))
+        except Exception:
+            irisu = 0
+        lots = rec.get("lots") or []
+        if not lots:
+            lots = [{"lot": rec.get("kakou_lot", ""), "hako": rec.get("hako_su", 0)}]
+        for lt in lots:
+            lot = (str(lt.get("lot") or "")).strip() or "（加工Lot未入力）"
+            try:
+                hako = int(float(lt.get("hako", 0) or 0))
+            except Exception:
+                hako = 0
+            if hako <= 0 and lot == "（加工Lot未入力）":
+                continue
+            hon = hako * irisu
+            hours = round(hon / kosuu, 1) if (kosuu and kosuu > 0 and hon > 0) else None
+            _by_day_e.setdefault(lot, []).append({"hours": hours})
+
+    _today_e = datetime.now().date()
+    if _today_e.month == 1:
+        _cutoff_e = _today_e.replace(year=_today_e.year - 1, month=12)
+    else:
+        _prev_m_e = _today_e.month - 1
+        _last_day_e = _cal_e.monthrange(_today_e.year, _prev_m_e)[1]
+        _cutoff_e = _today_e.replace(month=_prev_m_e, day=min(_today_e.day, _last_day_e))
+    _cutoff_week_e = _today_e - timedelta(days=7)
+
+    def _lot_date_e(lot):
+        m = _re_e.match(r'^(\d{2})\.(\d{1,2})\.(\d{1,2})$', lot)
+        if not m:
+            return None
+        yy, mm, dd = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return datetime(2000 + yy, mm, dd).date()
+        except Exception:
+            return None
+
+    _pct_list_e, _week_pct_list_e = [], []
+    for lot, items in _by_day_e.items():
+        _ld = _lot_date_e(lot)
+        if _ld is None or _ld < _cutoff_e or _ld >= _today_e:
+            continue  # 過去1ヶ月の範囲外・当日・日付不明はスキップ
+        sum_h = sum(it["hours"] for it in items if it["hours"] is not None)
+        pct = round(sum_h / WORK_H_E * 100) if WORK_H_E > 0 else 0
+        _pct_list_e.append(pct)
+        if _ld >= _cutoff_week_e:
+            _week_pct_list_e.append(pct)
+
+    week_avg  = round(sum(_week_pct_list_e) / len(_week_pct_list_e)) if _week_pct_list_e else None
+    month_avg = round(sum(_pct_list_e) / len(_pct_list_e)) if _pct_list_e else None
+    return week_avg, month_avg
+
+
 def _load_nittei_dict() -> dict:
     """no をキーに nittei.json を読む（denno・ad 取得用）"""
     _cands = [BASE_DIR / "nittei.json", Path(__file__).resolve().parent / "nittei.json"]
@@ -2953,6 +3034,15 @@ if page_sel.startswith("日程表"):
     html_src = _re.sub(r"let rows=\[.*?\];",     f"let rows={rows_js};",    html_src, flags=_re.DOTALL)
     vfdb_spec_js = _json.dumps(build_vfdb_spec_by_name(), ensure_ascii=False)
     html_src = _re.sub(r"const VFDB_SPEC = \{[^\n]*\};", lambda _m: "const VFDB_SPEC = " + vfdb_spec_js + ";", html_src)
+
+    # ヘッダー：週間・月間の稼働効率（当日除く）をコンパクト表示
+    _eff_week_h, _eff_month_h = _calc_kakou_eff_summary()
+    _eff_week_txt  = f"{_eff_week_h}％"  if _eff_week_h  is not None else "―"
+    _eff_month_txt = f"{_eff_month_h}％" if _eff_month_h is not None else "―"
+    html_src = html_src.replace(
+        "週間効率：0％　月間効率：0％",
+        f"週間効率：{_eff_week_txt}　月間効率：{_eff_month_txt}",
+    )
 
     if not nittei_rows:
         st.info("日程シートにデータがありません。SGT.xlsm の「日程」シートを確認してください。")
