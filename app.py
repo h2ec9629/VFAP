@@ -1752,15 +1752,17 @@ class _SaveHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length))
+            # nittei.js は {rows, gantt_render} 形式で送る。旧形式(配列)にも対応してrowsを取り出す
+            rows = data.get("rows") if isinstance(data, dict) else data
             nittei_path = self.__class__.base_dir / "nittei.json"
             with _save_lock:
                 nittei_path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
                 # 加工完了依頼の sgt_status.json 同期（qty==done の依頼を加工済に更新）
-                _sync_kakozu_status(self.__class__.base_dir, data)
+                _sync_kakozu_status(self.__class__.base_dir, rows)
             _gist_ok = False
             try:
-                _gist_ok = _gist_push_nittei(data)  # 端末間共有の正へ投函
+                _gist_ok = _gist_push_nittei(rows)  # 端末間共有の正へ投函（rows=配列）
             except Exception:
                 _gist_ok = False
             _gist_push_async()  # モバイル用 reminder_sync も従来通り
