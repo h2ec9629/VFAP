@@ -69,6 +69,8 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   td.pick-qty.edited{color:#fff;font-weight:600;}
   tr.day-end td{border-bottom:2px solid #555!important;}
   td.hako-muted{color:#444;}
+  /* 移動元(空)セル：梱包箱・支給数を1セルに結合した上で、意味を持たない罫線（何も区切っていない線）は表示しない */
+  td.gone{border-style:hidden!important;background:transparent!important;}
   .biko{border:1px solid #252525;min-height:64px;padding:6px;background:#1c1c1c;color:#e0e0e0;font-size:11px;cursor:text;}
   .biko:focus{outline:1px solid #e86a00;color:#e0e0e0;}
   .biko:empty::before{content:attr(data-placeholder);color:#555;pointer-events:none;}
@@ -132,6 +134,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   .biko{border:1px solid #d0d0d0;flex:1;min-height:34mm;background:#fff;}
   td.nm,td.nm-sm{white-space:normal;}
   td.hako-muted{color:#bbb;}
+  td.gone{border-style:hidden!important;}
   /* フッター：細い罫＋会社情報 */
   .print-foot{display:block;margin-top:7px;padding-top:5px;border-top:1px solid #1f1f1f;
               font-size:7.5pt;color:#555;text-align:center;letter-spacing:1px;font-weight:400;
@@ -210,6 +213,19 @@ function trimMatName(s){return s?String(s).replace(/\s*L=?\d+(\.\d+)?/g,'').trim
 const vMap={};
 for(const r of VFDB_LIST){const k=normName(r['品名']);if(k)vMap[k]=r;}
 
+// 支給数を「—」表示にする梱包箱（実数値を出さず別ルート支給扱い）
+const PICK_MUTE_PFX=['灯具-3','LED-A888','H型ジョイナー端材'].map(normName);
+const isMuted=h=>PICK_MUTE_PFX.some(m=>normName(h).startsWith(m));
+
+// 梱包箱の「種類」判定：LED-A／灯具／上で始まるものはプレフィックスで同種類扱い、それ以外は完全一致で判定
+function hakoCategory(hakoNm){
+  const n=normName(hakoNm);
+  if(n.toUpperCase().startsWith('LED-A'))return 'LED-A';
+  if(n.startsWith('灯具'))return '灯具';
+  if(n.startsWith('上'))return '上';
+  return n;
+}
+
 const pad=n=>String(n).padStart(2,'0');
 const toYMD=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const toMMDD=d=>`${pad(d.getMonth()+1)}/${pad(d.getDate())}`;
@@ -279,15 +295,13 @@ function render(){
   // 左テーブル
   const ltb=document.getElementById('left-tb');
   ltb.innerHTML='';
+
+  // ── 週またぎの梱包箱まとめ処理 ──
+  // Step0-a: まず日ごとに素のhakoGroupsを算出（hakoNm→{entries,irisu,muted,totalQty}）
+  const dayHakoGroups={};
   for(const d of days){
     const key=toMMDD(d);
-    const wday=WDAYS[d.getDay()];
-    const dels=delMap[key];
-    // 基材引取：hakoNmでグループ化（rowspan）、matNameは個別表示
-    const PICK_MUTE_PFX=['灯具-3','LED-A888','H型ジョイナー端材'].map(normName);
-    const isMuted=h=>PICK_MUTE_PFX.some(m=>normName(h).startsWith(m));
     const pickRaw=pickMap[key];
-    // Step1: hakoNm → {entries:[{matName,qty}], irisu, muted, totalQty}
     const hakoGroups=new Map();
     for(const p of pickRaw){
       const vf=vMap[normName(p.nm)]||{};
@@ -304,13 +318,51 @@ function render(){
       const ex=g.entries.find(e=>e.matName===matName);
       if(ex)ex.qty+=qty; else g.entries.push({matName,qty});
     }
+    dayHakoGroups[key]=hakoGroups;
+  }
+  // Step0-b: 種類（category）ごとに週内で最初に登場する日を特定
+  const catFirstDay={};
+  for(const d of days){
+    const key=toMMDD(d);
+    for(const [hakoNm] of dayHakoGroups[key]){
+      const cat=hakoCategory(hakoNm);
+      if(!(cat in catFirstDay))catFirstDay[cat]=key;
+    }
+  }
+  // Step0-c: 梱包箱（hakoNm）ごとに週合計の支給数を算出。「—」（別ルート支給）のものは合算せずそのまま「—」扱い
+  const hakoWeekly={};
+  const allHakoNames=[];
+  for(const d of days){
+    const key=toMMDD(d);
+    for(const [hakoNm,g] of dayHakoGroups[key]){
+      if(!hakoWeekly[hakoNm]){hakoWeekly[hakoNm]={shosu:0,muted:false};allHakoNames.push(hakoNm);}
+      const hw=hakoWeekly[hakoNm];
+      const shosu=g.muted?'—':(g.irisu>0?Math.ceil(g.totalQty/g.irisu):'—');
+      if(g.muted||shosu==='—')hw.muted=true;
+      else hw.shosu+=shosu;
+    }
+  }
+  const renderedHako=new Set(); // どの梱包箱をどこかの日で既に表示したか
+
+  for(const d of days){
+    const key=toMMDD(d);
+    const wday=WDAYS[d.getDay()];
+    const dels=delMap[key];
+    // 基材引取：hakoNmでグループ化（rowspan）、matNameは個別表示
+    const hakoGroups=dayHakoGroups[key];
     // Step2: flatten → picks[] with hakoNm rowspan情報
+    // hakoMode: 'first'=箱名/支給数を表示（rowspanの起点）／'spanned'=同グループ内の続き（rowspanで自動カバー）／'hidden'=今日は種類の初出日でないため箱名/支給数は非表示（品名/数量だけ残す）
     const picks=[];
     for(const [hakoNm,g] of hakoGroups){
-      const shosu=g.muted?'—':(g.irisu>0?Math.ceil(g.totalQty/g.irisu):'—');
+      const cat=hakoCategory(hakoNm);
+      const isTargetDay=catFirstDay[cat]===key;
+      const hw=hakoWeekly[hakoNm]||{shosu:0,muted:g.muted};
+      const shosu=hw.muted?'—':hw.shosu;
       g.entries.forEach((e,idx)=>{
-        picks.push({matName:e.matName,qty:e.qty,hakoNm,showHako:idx===0,hakoRowspan:g.entries.length,shosu,muted:g.muted,showMatName:true,matNameRowspan:1,kyukyu:g.kyukyu});
+        const hakoMode=!isTargetDay?'hidden':(idx===0?'first':'spanned');
+        picks.push({matName:e.matName,qty:e.qty,hakoNm,hakoMode,hakoRowspan:isTargetDay?g.entries.length:1,shosu,muted:g.muted,showMatName:true,matNameRowspan:1,kyukyu:g.kyukyu});
       });
+      if(isTargetDay)renderedHako.add(hakoNm);
     }
     // Step3: 連続する同一matNameにrowspanを付与
     let pi=0;
@@ -321,6 +373,15 @@ function render(){
       picks[pi].matNameRowspan=pj-pi;
       for(let pk=pi+1;pk<pj;pk++)picks[pk].showMatName=false;
       pi=pj;
+    }
+    // Step3b: 今日が初出日となる種類のうち、実体が別日にしかない梱包箱（例：LED-A592が23日にしかないが種類の初出日は22日）を品名なしの行として追加
+    for(const hakoNm of allHakoNames){
+      if(renderedHako.has(hakoNm))continue;
+      const cat=hakoCategory(hakoNm);
+      if(catFirstDay[cat]!==key)continue;
+      const hw=hakoWeekly[hakoNm]||{shosu:0,muted:false};
+      picks.push({matName:'',qty:null,hakoNm,hakoMode:'first',hakoRowspan:1,shosu:hw.muted?'—':hw.shosu,muted:hw.muted,showMatName:true,matNameRowspan:1,kyukyu:null});
+      renderedHako.add(hakoNm);
     }
     // Step4: 灯具カバー の数量を同一品名で合算し100/200単位に切り上げ
     const toguCoverTotals=new Map();
@@ -374,7 +435,7 @@ function render(){
           }
         }
         tr.appendChild(mkTd(qtyDisp,'qty r'));
-        if(pick.showHako){
+        if(pick.hakoMode==='first'){
           const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
           if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
           tr.appendChild(hakTd);
@@ -385,7 +446,12 @@ function render(){
           shosuTd.addEventListener('input',function(){shosuTd.classList.add('edited');});
           if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
           tr.appendChild(shosuTd);
+        }else if(pick.hakoMode==='hidden'){
+          const goneTd=mkTd('','gone');
+          goneTd.colSpan=2;
+          tr.appendChild(goneTd);
         }
+        // 'spanned' の場合は同一グループ先頭行のrowSpanで自動的にカバーされるため何も追加しない
       }else if(i===0&&picks.length===0){
         const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
       }else{
