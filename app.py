@@ -226,7 +226,7 @@ def _calc_kakou_eff_summary():
         _all_e = _load_all_cases(BASE_DIR)
     except Exception:
         return None, None
-    _all_e = [r for r in _all_e if r.get("kanryo") is True]
+    # 完了前の下書きも含める（当日分は加工Lot日付で下の判定により除外される）
     if not _all_e:
         return None, None
 
@@ -3136,11 +3136,7 @@ if page_sel == "加工記録":
     if not all_kakou:
         st.info("まだ加工記録がありません。日程ページの明細Noをタップして記録を追加してください。")
         st.stop()
-    # 「完了」ボタンが押された記録のみ履歴に表示する（下書き状態は対象外）
-    all_kakou = [r for r in all_kakou if r.get("kanryo") is True]
-    if not all_kakou:
-        st.info("まだ完了した加工記録がありません。記録入力画面で「完了」を押すとここに表示されます。")
-        st.stop()
+    # 完了前の下書きも一覧・稼働効率に含める（当日分は効率ビュー側で加工Lot日付により除外）
 
     # ── 表示切替（記録一覧 ⇄ 加工日別 稼働効率）──
     if "kakou_view" not in st.session_state:
