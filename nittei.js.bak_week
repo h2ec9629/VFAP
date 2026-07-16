@@ -7,7 +7,7 @@ function buildHead(){
     <span class="fld shohi hdr">消費</span>
     <span class="fld zansu hdr">残数</span>
     <span class="fld no hdr">明細No</span>
-    <span class="fld nm hdr"><span class="nmtxt">品名</span><button id="show-hidden-btn" onclick="toggleShowHidden();event.stopPropagation();" title="進捗100％＋納品日超過の行を非表示/表示（納品1週間以上前は常に非表示）">非表示解除</button></span>
+    <span class="fld nm hdr"><span class="nmtxt">品名</span><button id="show-hidden-btn" onclick="toggleShowHidden();event.stopPropagation();" title="進捗100%＋納品日超過の行を非表示/表示">非表示解除</button></span>
     <span class="fld qty hdr">注文数/h</span>
     <span class="fld done hdr">進捗</span>
     <span class="fld hrs hdr">工数/累計</span>
@@ -32,25 +32,14 @@ function pct(r){return r.qty?Math.round(r.done/r.qty*100):0;}
 
 // 自動非表示判定：進捗100% かつ 納品日(ad)が今日より前
 let showHidden = false;
-// 常時非表示：納品日が今日より1週間以上前 → ボタンに関係なく常に隠す（肥大化防止）
-function isAlwaysHide(r){
-  const ad = r.ad; if(!ad) return false;
-  const today = new Date();
-  const [m,d] = ad.split('/').map(Number);
-  const adDate = new Date(today.getFullYear(), m-1, d);
-  const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const weekAgo = new Date(todayDate); weekAgo.setDate(weekAgo.getDate()-7);
-  return adDate <= weekAgo;
-}
-// ボタン連動非表示：進捗100% かつ 納品日が今日より前（超過）
 function isAutoHide(r){
-  if(!r.qty || r.done < r.qty) return false;
+  if(!r.qty || r.done < r.qty) return false;  // 進捗100%未満はスキップしない
   const ad = r.ad; if(!ad) return false;
   const today = new Date();
   const [m,d] = ad.split('/').map(Number);
   const adDate = new Date(today.getFullYear(), m-1, d);
   const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return adDate < todayDate;
+  return adDate < todayDate;  // 納品日が今日より前（超過）
 }
 function toggleDetail(){
   const isHidden=document.body.classList.toggle('hide-kss');
@@ -85,8 +74,7 @@ function buildBody(){
   let sameDayCount=0;   // 納品日当日に食い込む件数（当日まで作業・黄）
   let prevZansu=null; // 8FL281304行の残数累積
   rows.forEach((r,idx)=>{
-    if(isAlwaysHide(r)) return;  // 納品1週間以上前は常に非表示（肥大化防止）
-    if(!showHidden && isAutoHide(r)) return;  // 完了超過はボタン連動
+    if(!showHidden && isAutoHide(r)) return;  // 自動非表示
     const p=pct(r);
     const orig=original.find(o=>o.no===r.no);
     const qtyMod=orig&&r.qty!==orig.qty;
@@ -823,7 +811,6 @@ function computeGanttRender() {
     }
 
     // 自動非表示行はganttから除外（buildBodyと同じ挙動）
-    if(isAlwaysHide(r)) return;  // 納品1週間以上前は常に非表示
     if (!showHidden && isAutoHide(r)) return;
 
     ganttRows.push({
