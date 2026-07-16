@@ -1133,7 +1133,8 @@ def _merge_pdfs_pdftk(pdf_paths: list, out_pdf: str) -> tuple:
 
 def paste_shizusho_via_com(sgt_path: Path, target_items: list) -> tuple:
     """
-    SGT.xlsm「指図書」シートの 38:56 行を各指示書ファイルに貼り付ける。
+    【旧方式・未使用】SGT.xlsm「指図書」シートの 38:56 行を Excel COM で貼り付ける。
+    現在は paste_shizusho_from_template（openpyxl・SGT不要）に置き換え済み。
     target_items: [(file_path_str, page_num), ...]
     戻り値: (成功: bool, メッセージ: str)
     """
@@ -1213,6 +1214,121 @@ def paste_shizusho_via_com(sgt_path: Path, target_items: list) -> tuple:
             except Exception:
                 pass
         return False, f"貼り付けエラー: {e}"
+
+
+def paste_shizusho_from_template(target_items: list) -> tuple:
+    """
+    指図書ブロック（38:56行）を shizusho_template.xlsx から
+    クリーン版（樹脂指示書_クリーン）に openpyxl で書き込む。
+    SGT.xlsm・Excel COM 不要。外部リンクも発生しない。
+    値（品目スペック・実績）は印刷時に _fill_jisseki が書き込む。
+    target_items: [(file_path_str, page_num), ...]  ※file_path は元ファイルのパス
+    戻り値: (成功: bool, メッセージ: str)
+    """
+    if not target_items:
+        return True, "貼り付け対象なし"
+    import time as _time
+    from copy import copy as _copy
+    from openpyxl.formula.translate import Translator as _Translator
+    from openpyxl.utils import get_column_letter as _gcl
+    from openpyxl.worksheet.cell_range import CellRange as _CellRange
+    from openpyxl.worksheet.formula import ArrayFormula as _ArrayFormula
+
+    tpl_path = Path(__file__).resolve().parent / "shizusho_template.xlsx"
+    if not tpl_path.exists():
+        return False, "shizusho_template.xlsx が見つかりません（make_shizusho_template.py で生成してください）"
+
+    try:
+        tpl_ws = openpyxl.load_workbook(tpl_path).active
+    except Exception as e:
+        return False, f"テンプレ読み込みエラー: {e}"
+
+    ROW_MIN, ROW_MAX = 38, 56
+    COL_MIN, COL_MAX = 1, 14
+
+    # ファイル単位でページをまとめる（開閉を1回に）
+    by_file: dict = {}
+    for _fp, _pg in target_items:
+        try:
+            _pg = int(_pg or 1)
+        except Exception:
+            _pg = 1
+        by_file.setdefault(Path(_fp).name, []).append(_pg)
+
+    pasted, errs = 0, []
+    for _name, _pages in by_file.items():
+        clean_path = CLEAN_DIR / _name
+        if not clean_path.exists():
+            errs.append(f"クリーン版なし: {_name}")
+            continue
+        try:
+            wb = None
+            for _retry in range(3):
+                try:
+                    wb = openpyxl.load_workbook(clean_path)
+                    break
+                except PermissionError:
+                    _time.sleep(2)
+            if wb is None:
+                wb = openpyxl.load_workbook(clean_path)
+            ws = wb.active
+
+            for _pg in sorted(set(_pages)):
+                _off = (_pg - 1) * 57
+
+                # 既存の結合セル（貼り付け先範囲内）を一旦解除
+                _tgt_range = _CellRange(min_row=ROW_MIN + _off, max_row=ROW_MAX + _off,
+                                        min_col=COL_MIN, max_col=COL_MAX)
+                for _m in [m for m in list(ws.merged_cells.ranges)
+                           if _tgt_range.issuperset(m)]:
+                    ws.unmerge_cells(str(_m))
+
+                # セル書き込み（スタイル＋静的ラベル・ローカル数式）
+                for _row in tpl_ws.iter_rows(min_row=ROW_MIN, max_row=ROW_MAX,
+                                             min_col=COL_MIN, max_col=COL_MAX):
+                    for _c in _row:
+                        _d = ws.cell(_c.row + _off, _c.column)
+                        if _c.has_style:
+                            _d.font          = _copy(_c.font)
+                            _d.border        = _copy(_c.border)
+                            _d.fill          = _copy(_c.fill)
+                            _d.alignment     = _copy(_c.alignment)
+                            _d.number_format = _c.number_format
+                            _d.protection    = _copy(_c.protection)
+                        _v = _c.value
+                        _dst_coord = f"{_gcl(_c.column)}{_c.row + _off}"
+                        if isinstance(_v, _ArrayFormula):
+                            # 配列数式（CSE）：参照とrefをページオフセット分シフト
+                            _txt = _v.text
+                            if _off:
+                                _txt = _Translator(_txt, origin=_c.coordinate
+                                                   ).translate_formula(_dst_coord)
+                            _v = _ArrayFormula(_dst_coord, _txt)
+                        elif isinstance(_v, str) and _v.startswith("=") and _off:
+                            _v = _Translator(_v, origin=_c.coordinate
+                                             ).translate_formula(_dst_coord)
+                        _d.value = _v
+
+                # 結合セル
+                for _m in tpl_ws.merged_cells.ranges:
+                    ws.merge_cells(start_row=_m.min_row + _off, start_column=_m.min_col,
+                                   end_row=_m.max_row + _off, end_column=_m.max_col)
+
+                # 行高
+                for _r in range(ROW_MIN, ROW_MAX + 1):
+                    _h = tpl_ws.row_dimensions[_r].height
+                    if _h is not None:
+                        ws.row_dimensions[_r + _off].height = _h
+
+                pasted += 1
+
+            wb.save(clean_path)
+        except Exception as e:
+            errs.append(f"{_name}: {e}")
+
+    if errs:
+        return (pasted > 0), f"{pasted}件貼り付け／エラー: " + " / ".join(errs[:3])
+    return True, f"{pasted}件に指図書を貼り付けました"
 
 # ══════════════════════════════════════════════════════════
 # ページ設定（必ず最初に呼ぶ）
@@ -3912,9 +4028,9 @@ if scan_btn:
             {"type": "success", "text": f"クリーン版 {_copied_clean}件保存"}
         )
 
-    # ② SGT_cloud側に指図書テンプレ（38:56行）を貼り付け → 外部リンク発生・SGT連携用
+    # ② クリーン版に指図書ブロック（38:56行）を書き込み → VFAP完結・SGT/COM不要
     with st.spinner("指図書を貼り付け中..."):
-        ok, msg = paste_shizusho_via_com(SGT_PATH, target_items)
+        ok, msg = paste_shizusho_from_template(target_items)
     if ok:
         st.session_state._scan_msgs.append({"type": "success", "text": msg})
     else:
