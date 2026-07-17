@@ -6,7 +6,7 @@
 <title>納品・引取日程</title>
 <style>
   /* スクロールバー */
-  :root { --accent:#d97757; --accent-hi:#e89070; --box:#8a8a8a; }
+  :root { --accent:#d97757; --accent-hi:#e89070; }
   ::-webkit-scrollbar              { width:17px; height:17px; }
   ::-webkit-scrollbar-track        { background:#1C1C1C; }
   ::-webkit-scrollbar-thumb        { background:var(--accent); border-radius:6px; border:2px solid #1C1C1C; }
@@ -48,15 +48,8 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   tr:hover td{background:#222;}
   td.date-c{background:#1c1c1c!important;color:#999;text-align:center;
             white-space:pre;vertical-align:top;padding-top:5px;font-size:11px;
-            font-weight:600;border:1px solid #444!important;border-right:2px solid #666!important;
-            border-left:2px solid var(--box)!important;border-top:2px solid var(--box)!important;
-            border-bottom:2px solid var(--box)!important;}
+            font-weight:600;border:1px solid #444!important;border-right:2px solid #666!important;}
   td.sep{border-right:2px solid #666!important;}
-  /* 日付ブロックの強調枠：上辺(day-start)・下辺(day-end)・右辺(edge-r)・右下角(edge-b) */
-  tr.day-start>td{border-top:2px solid var(--box)!important;}
-  td.edge-r{border-right:2px solid var(--box)!important;}
-  td.edge-b{border-bottom:2px solid var(--box)!important;}
-  td.gone.edge-r{border-right:2px solid var(--box)!important;}
   td.r{text-align:right;}
   td.qty{color:#f5c97b;}
   td.del-qty{color:#8ec88e;}
@@ -74,10 +67,10 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   td.pick-qty{text-align:right;color:#f5c97b;cursor:text;min-width:44px;}
   td.pick-qty:focus{outline:1px solid #e86a00;background:#1e1e1e;color:#fff;}
   td.pick-qty.edited{color:#fff;font-weight:600;}
-  tr.day-end td{border-bottom:2px solid var(--box)!important;}
+  tr.day-end td{border-bottom:2px solid #555!important;}
   td.hako-muted{color:#444;}
   /* 移動元(空)セル：梱包箱・支給数を1セルに結合した上で、意味を持たない罫線（何も区切っていない線）は表示しない */
-  td.gone{background:transparent!important;border-top-style:hidden!important;border-bottom-style:hidden!important;border-left:1px solid #444!important;border-right:1px solid #444!important;}
+  td.gone{border-style:hidden!important;background:transparent!important;}
   .biko{border:1px solid #252525;min-height:64px;padding:6px;background:#1c1c1c;color:#e0e0e0;font-size:11px;cursor:text;}
   .biko:focus{outline:1px solid #e86a00;color:#e0e0e0;}
   .biko:empty::before{content:attr(data-placeholder);color:#555;pointer-events:none;}
@@ -121,14 +114,8 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   td.date-c{background:#ececec!important;color:#1a1a1a!important;font-weight:600;
             text-align:center;white-space:pre-line;vertical-align:middle;
             border:1px solid #d0d0d0!important;
-            border-left:2px solid #4d4d4d!important;border-top:2px solid #4d4d4d!important;
-            border-bottom:2px solid #4d4d4d!important;
             -webkit-print-color-adjust:exact;print-color-adjust:exact;}
   td.sep{border-right:2px solid #999!important;}
-  /* 日付ブロックの強調枠（印刷） */
-  tr.day-start>td{border-top:2px solid #4d4d4d!important;}
-  td.edge-r,td.gone.edge-r{border-right:2px solid #4d4d4d!important;}
-  td.edge-b{border-bottom:2px solid #4d4d4d!important;}
   /* 日区切り：下罫を太く */
   tr.day-end td{border-bottom:2px solid #4d4d4d!important;
      -webkit-print-color-adjust:exact;print-color-adjust:exact;}
@@ -147,7 +134,7 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;font-size:13px;}
   .biko{border:1px solid #d0d0d0;flex:1;min-height:34mm;background:#fff;}
   td.nm,td.nm-sm{white-space:normal;}
   td.hako-muted{color:#bbb;}
-  td.gone{border-top-style:hidden!important;border-bottom-style:hidden!important;border-left:1px solid #d0d0d0!important;border-right:1px solid #d0d0d0!important;}
+  td.gone{border-style:hidden!important;}
   /* フッター：細い罫＋会社情報 */
   .print-foot{display:block;margin-top:7px;padding-top:5px;border-top:1px solid #1f1f1f;
               font-size:7.5pt;color:#555;text-align:center;letter-spacing:1px;font-weight:400;
@@ -449,35 +436,30 @@ function render(){
         }
         tr.appendChild(mkTd(qtyDisp,'qty r'));
         if(pick.hakoMode==='first'){
-          const span=pick.hakoRowspan||1;
-          const atBottom=(i+span===rows); // このセルの下端が日ブロック最終行に届くか
           const hakTd=mkTd(pick.hakoNm,pick.muted?'hako-muted':'');
           if(pick.hakoRowspan>1)hakTd.rowSpan=pick.hakoRowspan;
-          if(atBottom)hakTd.classList.add('edge-b');
           tr.appendChild(hakTd);
-          const shosuTd=mkTd(String(pick.shosu),'r pick-qty edge-r');
+          const shosuTd=mkTd(String(pick.shosu),'r pick-qty');
           shosuTd.contentEditable='true';
           shosuTd.dataset.day=key;
           shosuTd.dataset.hako=pick.hakoNm;
           shosuTd.addEventListener('input',function(){shosuTd.classList.add('edited');});
           if(pick.hakoRowspan>1)shosuTd.rowSpan=pick.hakoRowspan;
-          if(atBottom)shosuTd.classList.add('edge-b');
           tr.appendChild(shosuTd);
         }else if(pick.hakoMode==='hidden'){
-          const goneTd=mkTd('','gone edge-r'+(i===rows-1?' edge-b':''));
+          const goneTd=mkTd('','gone');
           goneTd.colSpan=2;
           tr.appendChild(goneTd);
         }
         // 'spanned' の場合は同一グループ先頭行のrowSpanで自動的にカバーされるため何も追加しない
       }else if(i===0&&picks.length===0){
-        const ptd=mkTd('引取なし','empty edge-r'+(i===rows-1?' edge-b':''));ptd.colSpan=4;tr.appendChild(ptd);
+        const ptd=mkTd('引取なし','empty');ptd.colSpan=4;tr.appendChild(ptd);
       }else{
         tr.appendChild(mkTd('',''));
         tr.appendChild(mkTd('',''));
         tr.appendChild(mkTd('',''));
-        tr.appendChild(mkTd('','edge-r'+(i===rows-1?' edge-b':'')));
+        tr.appendChild(mkTd('',''));
       }
-      if(i===0) tr.classList.add('day-start');
       if(i===rows-1) tr.classList.add('day-end');
       ltb.appendChild(tr);
     }
@@ -552,26 +534,6 @@ function saveHaisoState(){
     .then(function(){setTimeout(function(){btn.textContent=old;btn.disabled=false;},2600);});
 }
 
-// その他支給依頼テーブルの入力挙動
-function wireSonoTable(){
-  document.querySelectorAll('#sono-ta-tb tr').forEach(function(tr){
-    const sel=tr.querySelector('.kyoyu-sel');
-    const qty=tr.querySelector('.sono-qty');
-    const dt=tr.querySelector('.sono-dt');
-    // 資材名を空欄選択したら数量・支給希望日をクリア
-    if(sel){sel.addEventListener('change',function(){
-      if(sel.value===''){ if(qty)qty.textContent=''; if(dt)dt.textContent=''; }
-    });}
-    // 数量・支給希望日：Enterで改行せず確定（フォーカスを外す）
-    [qty,dt].forEach(function(cell){
-      if(!cell)return;
-      cell.addEventListener('keydown',function(e){
-        if(e.key==='Enter'){ e.preventDefault(); cell.blur(); }
-      });
-    });
-  });
-}
-document.addEventListener('DOMContentLoaded', wireSonoTable);
 document.addEventListener('DOMContentLoaded', setThisWeek);
 </script>
 </body>

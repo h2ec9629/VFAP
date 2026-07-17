@@ -36,17 +36,18 @@ tbody td{padding:6px 10px;border-right:1px solid #232323;font-size:13px;white-sp
 td.nm{max-width:260px;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#ccc;}
 td.qty{text-align:right;color:#7bb8f5;}
 td.af{color:#a0c8a0;font-size:12px;}
-td.hako{color:#f5c97b;}
-td.shosu{text-align:right;font-weight:700;color:#e86a00;font-size:14px;}
-td.hako-null{color:#555;font-style:italic;}
+td.hako{color:#f5c97b;font-size:14px;}
+td.shosu{text-align:right;font-weight:700;color:#e86a00;font-size:16px;}
+td.cnt{text-align:right;color:#7bb8f5;}
 .done-row{opacity:.4;}
 .summary-wrap{padding:14px;}
-.summary-title{font-size:13px;color:#aaa;margin-bottom:8px;font-weight:600;}
-.summary-grid{display:flex;flex-wrap:wrap;gap:8px;}
-.hako-chip{background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:6px 14px;min-width:120px;display:flex;flex-direction:column;gap:2px;}
-.hako-chip .chip-name{font-size:12px;color:#f5c97b;}
-.hako-chip .chip-count{font-size:18px;font-weight:700;color:#e86a00;}
-.hako-chip .chip-label{font-size:10px;color:#666;}
+.total-line{display:flex;align-items:baseline;gap:6px;background:#1e1e1e;border:1px solid #333;border-radius:6px;padding:10px 16px;width:fit-content;}
+.total-lbl{font-size:13px;color:#aaa;margin-right:6px;}
+.total-val{font-size:22px;font-weight:700;color:#e86a00;}
+.total-val2{font-size:22px;font-weight:700;color:#7bb8f5;}
+.total-unit{font-size:11px;color:#666;}
+.total-sep{color:#444;margin:0 8px;}
+.nohako-note{font-size:12px;color:#888;margin-top:8px;}
 .empty{padding:40px;text-align:center;color:#555;}
 </style>
 </head>
@@ -64,29 +65,35 @@ td.hako-null{color:#555;font-style:italic;}
   <label style="margin-left:10px;display:flex;align-items:center;gap:4px;">
     <input type="checkbox" id="fil-undone" checked> 未完了のみ
   </label>
+  <label style="margin-left:10px;display:flex;align-items:center;gap:4px;">
+    <input type="checkbox" id="fil-future" checked> 本日以降のみ
+  </label>
 </div>
 <div class="main-wrap">
   <table id="main-table">
     <thead><tr>
-      <th data-col="nm">品名 <span class="sort-icon">▲</span></th>
-      <th data-col="qty">依頼数 <span class="sort-icon">▲</span></th>
-      <th data-col="af" class="sorted">引取日 <span class="sort-icon">▲</span></th>
       <th data-col="hako">梱包箱 <span class="sort-icon">▲</span></th>
-      <th data-col="shosu">使用数 <span class="sort-icon">▲</span></th>
+      <th data-col="shosu" class="sorted">合計使用数 <span class="sort-icon">▲</span></th>
+      <th data-col="cnt">対象タスク数 <span class="sort-icon">▲</span></th>
     </tr></thead>
     <tbody id="tbody"></tbody>
   </table>
   <div class="empty" id="empty-msg" style="display:none">該当するタスクがありません</div>
 </div>
 <div class="summary-wrap">
-  <div class="summary-title">▼ 梱包箱 合計使用数（フィルター適用中）</div>
-  <div class="summary-grid" id="summary-grid"></div>
+  <div class="total-line">
+    <span class="total-lbl">総合計</span>
+    <span class="total-val" id="total-shosu">0</span><span class="total-unit">枚</span>
+    <span class="total-sep">/</span>
+    <span class="total-val2" id="total-cnt">0</span><span class="total-unit">タスク</span>
+  </div>
+  <div class="nohako-note" id="nohako-note"></div>
 </div>
 <script>
 // ── app.py がここを書き換えてデータを注入する ──
 const HAKO_ROWS = [];
 // ─────────────────────────────────────────────
-let sortCol='af', sortAsc=true;
+let sortCol='shosu', sortAsc=false;
 
 function normDate(s){
   if(!s) return '';
@@ -103,23 +110,49 @@ function buildFilters(){
     .forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v;hakoSel.appendChild(o);});
 }
 
+// 引取日(MM/DD or 2026/MM/DD)を Date に。判定不可なら null
+function afDate(s){
+  const d=normDate(s);
+  if(!d) return null;
+  const t=new Date(d.replace(/-/g,'/'));
+  return isNaN(t) ? null : t;
+}
+
 function getFiltered(){
   const afV=document.getElementById('fil-af').value;
   const hakoV=document.getElementById('fil-hako').value;
   const undone=document.getElementById('fil-undone').checked;
+  const future=document.getElementById('fil-future').checked;
+  const today=new Date(); today.setHours(0,0,0,0);
   return HAKO_ROWS.filter(r=>{
     if(afV && r.af!==afV) return false;
     if(hakoV && r.hako!==hakoV) return false;
     if(undone && r.done) return false;
+    if(future){
+      const d=afDate(r.af);           // 引取日不明のタスクは残す
+      if(d && d < today) return false; // 引取日が過去のものだけ除外
+    }
     return true;
   });
+}
+
+// タスク明細 → 梱包箱ごとに合計使用数・対象タスク数を集計
+function aggregate(rows){
+  const map={};
+  let noHako=0;
+  rows.forEach(r=>{
+    if(!r.hako){noHako++;return;}
+    if(!map[r.hako]) map[r.hako]={hako:r.hako,shosu:0,cnt:0};
+    map[r.hako].shosu+=(r.shosu||0);
+    map[r.hako].cnt+=1;
+  });
+  return {aggRows:Object.values(map),noHako};
 }
 
 function sortRows(rows){
   return [...rows].sort((a,b)=>{
     let av=a[sortCol]??'', bv=b[sortCol]??'';
-    if(sortCol==='af'){av=normDate(av);bv=normDate(bv);}
-    if(sortCol==='qty'||sortCol==='shosu'){av=+av||0;bv=+bv||0;}
+    if(sortCol==='shosu'||sortCol==='cnt'){av=+av||0;bv=+bv||0;}
     if(av<bv) return sortAsc?-1:1;
     if(av>bv) return sortAsc?1:-1;
     return 0;
@@ -130,7 +163,8 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 
 function render(){
   const filtered=getFiltered();
-  const rows=sortRows(filtered);
+  const {aggRows,noHako}=aggregate(filtered);
+  const rows=sortRows(aggRows);
   const tbody=document.getElementById('tbody');
   if(!rows.length){
     tbody.innerHTML='';
@@ -138,26 +172,21 @@ function render(){
   } else {
     document.getElementById('empty-msg').style.display='none';
     tbody.innerHTML=rows.map(r=>{
-      const dc=r.done?' done-row':'';
-      const hakoTd=r.hako?`<td class="hako${dc}">${esc(r.hako)}</td>`:`<td class="hako-null${dc}">—</td>`;
-      const shosuTd=r.hako?`<td class="shosu${dc}">${r.shosu}</td>`:`<td class="shosu${dc}" style="color:#555">—</td>`;
-      return `<tr><td class="nm${dc}" title="${esc(r.nm)}">${esc(r.nm)}</td><td class="qty${dc}">${r.qty}</td><td class="af${dc}">${esc(r.af||'—')}</td>${hakoTd}${shosuTd}</tr>`;
+      return `<tr><td class="hako">${esc(r.hako)}</td><td class="shosu">${r.shosu}</td><td class="cnt">${r.cnt}</td></tr>`;
     }).join('');
   }
-  const badge=document.getElementById('hd-badge');
-  document.getElementById('hd-sub').textContent=`${rows.length} 件`;
-  if(rows.length!==HAKO_ROWS.length){badge.textContent=`全${HAKO_ROWS.length}件中`;badge.style.display='';}
-  else badge.style.display='none';
-  renderSummary(rows);
-}
+  // 合計行
+  const totalShosu=rows.reduce((s,r)=>s+r.shosu,0);
+  const totalCnt=rows.reduce((s,r)=>s+r.cnt,0);
+  document.getElementById('total-shosu').textContent=totalShosu;
+  document.getElementById('total-cnt').textContent=totalCnt;
+  const nh=document.getElementById('nohako-note');
+  nh.textContent=noHako>0?`※ 箱未設定のタスク ${noHako} 件は集計外`:'';
 
-function renderSummary(rows){
-  const map={};
-  rows.forEach(r=>{if(r.hako) map[r.hako]=(map[r.hako]||0)+(r.shosu||0);});
-  const grid=document.getElementById('summary-grid');
-  const keys=Object.keys(map).sort();
-  if(!keys.length){grid.innerHTML='<span style="color:#555;font-size:12px;">表示中のタスクに箱情報がありません</span>';return;}
-  grid.innerHTML=keys.map(k=>`<div class="hako-chip"><span class="chip-name">${esc(k)}</span><span class="chip-count">${map[k]}</span><span class="chip-label">枚</span></div>`).join('');
+  const badge=document.getElementById('hd-badge');
+  document.getElementById('hd-sub').textContent=`${rows.length} 種`;
+  if(filtered.length!==HAKO_ROWS.length){badge.textContent=`全${HAKO_ROWS.length}件中`;badge.style.display='';}
+  else badge.style.display='none';
 }
 
 function updateSortIcons(){
@@ -179,6 +208,7 @@ document.querySelectorAll('thead th[data-col]').forEach(th=>{
 document.getElementById('fil-af').addEventListener('change',render);
 document.getElementById('fil-hako').addEventListener('change',render);
 document.getElementById('fil-undone').addEventListener('change',render);
+document.getElementById('fil-future').addEventListener('change',render);
 
 buildFilters();updateSortIcons();render();
 </script>

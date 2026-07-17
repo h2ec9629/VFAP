@@ -1470,61 +1470,6 @@ CHOHYO_DIRS = {
 }
 CHOHYO_BY_YEAR_ONLY = {"請求明細書"}
 
-# ── 配送PDFメール送信の定型（1項目ずつ設定していく）──
-#   プレビュー画面の左バー「📧 Outlook作成」でこの定型を使い、
-#   表示中のPDFを添付した新規メールをOutlookで開く（送信はしない／Displayのみ）。
-MAIL_TO      = "ntada@carbide.co.jp"   # 宛先（; 区切りで複数可）
-MAIL_CC      = "tkamise@carbide.co.jp"   # CC（; 区切りで複数可）
-MAIL_SUBJECT = "{m}月{d}日週　配送日程表の送付"   # 表題（{m}{d}=週頭の月/日で自動置換）
-#   本文は「頭 → （支給依頼があれば支給ブロック）→ 締め」の順で組む（{m}{d}=週頭の月/日）
-#   各ブロックは空行で連結する。頭→(支給)→(備考)→締めの順（{m}{d}=週頭の月/日）
-MAIL_BODY_HEAD = "いつもお世話になっております。\n\n{m}月{d}日の配送日程表を送付致します。"
-# 支給依頼（その他、支給依頼枠）に資材名がある時だけ、この一文＋表を差し込む
-MAIL_BODY_SUPPLY_INTRO = "別途、支給依頼がありますので以下の支給も合わせてお願い致します。"
-MAIL_BODY_TAIL = "ご確認の上、ご対応の程、よろしくお願い致します。"
-
-# PDF出力時に拾った「その他、支給依頼」行と「備考」を、生成PDFのパスに紐づけて一時保管
-#   { pdf_path(str): {"sono":[{"sel","qty","dt"},...], "biko":"備考文"} }
-_CHOHYO_SONO_CACHE = {}
-
-# 生成PDFのプレビュー画面（左バー＋PDF埋め込み）。__PDF_SRC__/__PDF_PATH__ を差し替えて使う
-_PDF_VIEW_HTML = r"""<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
-<title>配送日程表 PDFプレビュー</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Meiryo','Yu Gothic UI',sans-serif;background:#2b2b2b;color:#e0e0e0;height:100vh;display:flex;overflow:hidden;}
-.side{width:200px;flex:0 0 200px;background:#1c1c1c;border-right:1px solid #333;padding:16px 14px;display:flex;flex-direction:column;gap:12px;}
-.side h2{font-size:13px;color:#aaa;font-weight:700;margin-bottom:4px;}
-.side button{width:100%;background:#e86a00;color:#fff;border:none;border-radius:6px;padding:12px 10px;font-size:14px;font-weight:700;cursor:pointer;}
-.side button:hover{background:#c55a00;}
-.side button:disabled{opacity:.6;cursor:default;}
-.side .msg{font-size:12px;color:#8ec88e;min-height:34px;line-height:1.5;word-break:break-all;}
-.side .msg.err{color:#e08a8a;}
-.main{flex:1;height:100vh;}
-.main iframe{width:100%;height:100%;border:none;background:#525659;}
-</style></head><body>
-<div class="side">
-  <h2>📄 配送日程表</h2>
-  <button id="btn-mail" onclick="composeMail()">📧 Outlook作成</button>
-  <div class="msg" id="msg"></div>
-</div>
-<div class="main"><iframe src="__PDF_SRC__"></iframe></div>
-<script>
-var PDF_PATH = __PDF_PATH__;
-// 立ち上げ時にウィンドウを画面いっぱいへ拡大（PDFは#zoom=100で原寸表示）
-try{ window.moveTo(0,0); window.resizeTo(screen.availWidth, screen.availHeight); }catch(e){}
-function composeMail(){
-  var b=document.getElementById('btn-mail'), m=document.getElementById('msg');
-  var old=b.textContent; b.disabled=true; b.textContent='作成中…'; m.className='msg'; m.textContent='';
-  fetch('/compose_mail',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({p:PDF_PATH})})
-    .then(function(r){return r.json();})
-    .then(function(j){ m.className=j.ok?'msg':'msg err'; m.textContent=(j.ok?'✓ ':'✗ ')+(j.msg||''); })
-    .catch(function(){ m.className='msg err'; m.textContent='✗ 通信失敗'; })
-    .then(function(){ b.disabled=false; b.textContent=old; });
-}
-</script></body></html>"""
-
 # ── 配送ページ（haiso.html）の入力状態保存（支給数・支給依頼・備考）──
 #    週(week-start)ごとにJSONで保管。BASE_DIR直下＝OneDriveのSGT_cloud等クラウド同期フォルダ。
 HAISO_STATE_PATH = BASE_DIR / "haiso_state.json"
@@ -1638,33 +1583,13 @@ _CHOHYO_INJECT_HAISO = r"""
       });
       var clone=document.documentElement.cloneNode(true);
       clone.querySelectorAll('script').forEach(function(s){s.remove();});
-      // 「その他、支給依頼」枠の入力行を拾う（資材名が入っている行のみ・メール本文用）
-      var sono=[];
-      document.querySelectorAll('#sono-ta-tb tr').forEach(function(tr){
-        var sel=tr.querySelector('.kyoyu-sel');
-        var qty=tr.querySelector('.sono-qty');
-        var dt=tr.querySelector('.sono-dt');
-        var sv=sel?(sel.value||'').trim():'';
-        if(sv) sono.push({sel:sv, qty:qty?qty.textContent.trim():'', dt:dt?dt.textContent.trim():''});
-      });
-      // 備考欄の文章（メール本文用）
-      var bikoEl=document.querySelector('.biko');
-      var biko=bikoEl?(bikoEl.textContent||'').trim():'';
       var old=b.textContent; b.disabled=true; b.textContent='保存中…';
-      // 生成PDF確認用ウィンドウは、クリック操作中（fetch前）に先に開く＝ポップアップブロック回避
-      var pw=window.open('','_blank','width=1200,height=860,scrollbars=yes');
       fetch('http://localhost:8513/save_chohyo',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({kind:'配送日程表',year:String(y),month:m,landscape:true,
-          filename:y+m+dd+'_配送日程表.pdf',html:clone.outerHTML,sono:sono,biko:biko})})
+          filename:y+m+dd+'_配送日程表.pdf',html:clone.outerHTML})})
         .then(function(r){return r.json();})
-        .then(function(j){
-          b.textContent=j.ok?'✓ 保管しました':'✗ '+(j.msg||'失敗');
-          if(j.ok&&j.path){
-            var u='http://localhost:8513/pdf_view?p='+encodeURIComponent(j.path);
-            if(pw&&!pw.closed){pw.location.href=u;}else{window.open(u,'_blank');}
-          }else if(pw&&!pw.closed){pw.close();}
-        })
-        .catch(function(){b.textContent='✗ 通信失敗'; if(pw&&!pw.closed)pw.close();})
+        .then(function(j){b.textContent=j.ok?'✓ 保管しました':'✗ '+(j.msg||'失敗');})
+        .catch(function(){b.textContent='✗ 通信失敗';})
         .then(function(){setTimeout(function(){b.textContent=old;b.disabled=false;},2600);});
     };
     bar.appendChild(b);
@@ -1775,53 +1700,6 @@ def _html_to_pdf_edge(html_text: str, out_pdf: Path, landscape: bool = False) ->
             _tmp_html.unlink(missing_ok=True)
         except Exception:
             pass
-
-# ── Outlook 新規メール作成（PDF添付・宛先/CC/表題/本文セット・送信はしない）──
-def _outlook_compose(pdf_path: Path, to: str = "", cc: str = "",
-                     subject: str = "", body: str = "", html_body: str = "") -> tuple:
-    """指定PDFを添付した新規メールをOutlookで開く（Display）。戻り値 (ok, msg)。
-    html_body があればHTMLメール、無ければ body をプレーン本文にする。
-    ※ Send は呼ばない。実際の送信はユーザーがOutlook画面で行う。"""
-    try:
-        import pythoncom
-        import win32com.client
-        pythoncom.CoInitialize()
-    except ImportError:
-        return False, "pywin32 未インストール（pip install pywin32）"
-    try:
-        _p = Path(pdf_path).resolve()
-        if not (_p.exists() and _p.suffix.lower() == ".pdf"):
-            return False, "PDFが見つかりません"
-        try:
-            _ol = win32com.client.GetActiveObject("Outlook.Application")
-        except Exception:
-            _ol = win32com.client.Dispatch("Outlook.Application")
-        _mail = _ol.CreateItem(0)   # 0 = olMailItem
-        if to:      _mail.To      = to
-        if cc:      _mail.CC      = cc
-        if subject: _mail.Subject = subject
-        _mail.Attachments.Add(str(_p))
-        # 先にDisplayして、Outlook設定済みの署名をHTMLBody/Bodyに入れさせる →
-        # その署名を読み取り、本文の下に残す形で連結（署名を消さない）
-        _mail.Display()             # 新規メール画面を表示（送信はしない）
-        if html_body:
-            _sig = _mail.HTMLBody or ""
-            # 本文だけ遊ゴシックで包む（署名 _sig はOutlook側の書式を尊重してそのまま）
-            _wrapped = ('<div style="font-family:\'游ゴシック\',\'Yu Gothic\',sans-serif;'
-                        'font-size:10.5pt;">' + html_body + '</div>')
-            _mail.HTMLBody = _wrapped + _sig
-        elif body:
-            _sig = _mail.Body or ""
-            _mail.Body = body + (("\n" + _sig) if _sig else "")
-        return True, "Outlookで新規メールを開きました"
-    except Exception as _e:
-        return False, str(_e)
-    finally:
-        try:
-            pythoncom.CoUninitialize()
-        except Exception:
-            pass
-
 
 # ══════════════════════════════════════════════════════════
 # nittei.json 保存サーバー（バックグラウンドスレッド port:8512）
@@ -1964,100 +1842,6 @@ def _refresh_nittei_from_gist(base_dir) -> bool:
         return False
 
 
-# ══════════════════════════════════════════════════════════
-# Gist同期（配送ページ haiso_state：端末間共有の「正」）
-#   保存時: OneDrive書き出し＋Gistへ投函
-#   読込時: Gistを正としてローカル haiso_state.json を更新
-#   GIST_IDはOneDrive(BASE_DIR)のテキストに保存し全端末で共有。
-#   未作成なら初回保存時に自動作成する。
-# ══════════════════════════════════════════════════════════
-HAISO_GIST_FILE    = "haiso_state_raw.json"
-HAISO_GIST_ID_PATH = BASE_DIR / "haiso_gist_id.txt"
-
-def _haiso_gist_id() -> str:
-    try:
-        if HAISO_GIST_ID_PATH.exists():
-            return HAISO_GIST_ID_PATH.read_text(encoding="utf-8").strip()
-    except Exception:
-        pass
-    return ""
-
-def _haiso_gist_pull():
-    """Gistの haiso_state_raw.json から週state(dict)を返す。失敗時 None。"""
-    pat = _gist_pat(); gid = _haiso_gist_id()
-    if not pat or not gid:
-        return None
-    try:
-        req = _urlreq.Request(
-            f"https://api.github.com/gists/{gid}",
-            headers={"Authorization": f"token {pat}", "User-Agent": "vfap-gist",
-                     "Accept": "application/vnd.github+json"})
-        with _urlreq.urlopen(req, timeout=15) as r:
-            g = json.load(r)
-        raw = g["files"][HAISO_GIST_FILE]["content"]
-        payload = json.loads(raw)
-        data = payload.get("weeks") if isinstance(payload, dict) and "weeks" in payload else payload
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
-
-def _haiso_gist_push(all_state) -> bool:
-    """週state全体(dict)をGistへ投函。未作成なら新規作成しIDを保存。成功でTrue。"""
-    pat = _gist_pat()
-    if not pat or not isinstance(all_state, dict):
-        return False
-    payload = {
-        "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "device":   _socket.gethostname(),
-        "weeks":    all_state,
-    }
-    content = json.dumps(payload, ensure_ascii=False, indent=2)
-    gid = _haiso_gist_id()
-    try:
-        if gid:
-            body = json.dumps({"files": {HAISO_GIST_FILE: {"content": content}}}).encode("utf-8")
-            req = _urlreq.Request(
-                f"https://api.github.com/gists/{gid}", data=body, method="PATCH",
-                headers={"Authorization": f"token {pat}", "User-Agent": "vfap-gist",
-                         "Accept": "application/vnd.github+json"})
-            with _urlreq.urlopen(req, timeout=20) as r:
-                return 200 <= r.status < 300
-        # 初回：secret gistを新規作成してIDを保存
-        body = json.dumps({
-            "description": "VFAP haiso_state 端末間共有",
-            "public": False,
-            "files": {HAISO_GIST_FILE: {"content": content}},
-        }).encode("utf-8")
-        req = _urlreq.Request(
-            "https://api.github.com/gists", data=body, method="POST",
-            headers={"Authorization": f"token {pat}", "User-Agent": "vfap-gist",
-                     "Accept": "application/vnd.github+json"})
-        with _urlreq.urlopen(req, timeout=20) as r:
-            if 200 <= r.status < 300:
-                g = json.load(r)
-                try:
-                    HAISO_GIST_ID_PATH.write_text(str(g.get("id", "")), encoding="utf-8")
-                except Exception:
-                    pass
-                return True
-        return False
-    except Exception:
-        return False
-
-def _refresh_haiso_from_gist() -> bool:
-    """Gistを正としてローカル haiso_state.json を更新。更新できたら True。"""
-    data = _haiso_gist_pull()
-    if data is None:
-        return False
-    try:
-        with _haiso_state_lock:
-            HAISO_STATE_PATH.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        return True
-    except Exception:
-        return False
-
-
 class _SaveHandler(BaseHTTPRequestHandler):
     base_dir = None
     def log_message(self, *a): pass
@@ -2190,28 +1974,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
             except Exception:
                 self.send_response(500); self._cors(); self.end_headers()
             return
-        if self.path.split("?")[0] == "/pdf_view":
-            try:
-                from urllib.parse import urlparse as _up, parse_qs as _pq, unquote as _uq, quote as _qt
-                _qp = _pq(_up(self.path).query)
-                _pp = _uq(_qp.get("p", [""])[0])
-                _target = Path(_pp).resolve()
-                _root   = CHOHYO_ROOT.resolve()
-                if not (str(_target).startswith(str(_root)) and _target.suffix.lower()==".pdf" and _target.exists()):
-                    self.send_response(404); self._cors(); self.end_headers(); return
-                _page = (_PDF_VIEW_HTML
-                         .replace("__PDF_SRC__", "/serve_pdf?p=" + _qt(str(_target)) + "#zoom=100")
-                         .replace("__PDF_PATH__", json.dumps(str(_target))))
-                _b = _page.encode("utf-8")
-                self.send_response(200); self._cors()
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(_b)))
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                self.wfile.write(_b)
-            except Exception:
-                self.send_response(500); self._cors(); self.end_headers()
-            return
         if self.path.split("?")[0] == "/ui":
             # app.py と同じフォルダの kiroku.html を使う（BASE_DIR とは独立）
             ui_path = Path(__file__).resolve().parent / "kiroku.html"
@@ -2270,10 +2032,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 from urllib.parse import urlparse as _up3, parse_qs as _pq3
                 _qp3 = _pq3(_up3(self.path).query)
                 _week = (_qp3.get("week", [""])[0])
-                try:
-                    _refresh_haiso_from_gist()  # Gistを正にローカル更新
-                except Exception:
-                    pass
                 with _haiso_state_lock:
                     _all = {}
                     if HAISO_STATE_PATH.exists():
@@ -2359,14 +2117,9 @@ class _KakouHandler(BaseHTTPRequestHandler):
                     _tmp.write_text(
                         json.dumps(_all, ensure_ascii=False, indent=2), encoding="utf-8")
                     os.replace(str(_tmp), str(HAISO_STATE_PATH))
-                _hg_ok = False
-                try:
-                    _hg_ok = _haiso_gist_push(_all)  # 端末間共有の正へ投函
-                except Exception:
-                    _hg_ok = False
                 self.send_response(200); self._cors()
                 self.send_header("Content-Type", "application/json"); self.end_headers()
-                self.wfile.write(json.dumps({"ok": True, "gist": _hg_ok}, ensure_ascii=False).encode("utf-8"))
+                self.wfile.write(json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8"))
             except Exception as _e:
                 self.send_response(500); self._cors()
                 self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -2393,14 +2146,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 _ok, _msg = _html_to_pdf_edge(_html, _outp, landscape=_land)
                 if _ok:
                     _jsonl_log("chohyo_pdf", {"kind": _kind, "file": _fname})
-                    # メール本文用に「その他、支給依頼」行と「備考」を生成PDFへ紐づけて保管
-                    try:
-                        _CHOHYO_SONO_CACHE[str(_outp)] = {
-                            "sono": _pl.get("sono") or [],
-                            "biko": _pl.get("biko") or "",
-                        }
-                    except Exception:
-                        pass
                 self.send_response(200 if _ok else 500); self._cors()
                 self.send_header("Content-Type", "application/json"); self.end_headers()
                 self.wfile.write(json.dumps(
@@ -2411,66 +2156,6 @@ class _KakouHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json"); self.end_headers()
                 self.wfile.write(json.dumps(
                     {"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8"))
-            return
-        if self.path.split("?")[0] == "/compose_mail":
-            try:
-                _len = int(self.headers.get("Content-Length", 0))
-                _pl  = json.loads(self.rfile.read(_len)) if _len else {}
-                _target = Path(str(_pl.get("p", ""))).resolve()
-                _root   = CHOHYO_ROOT.resolve()
-                if not (str(_target).startswith(str(_root)) and _target.suffix.lower()==".pdf" and _target.exists()):
-                    raise ValueError("PDFが不正です")
-                # ファイル名先頭の YYYYMMDD（週頭の日付）から件名を組む
-                import re as _re_cm, html as _html
-                _nl2br = lambda s: _html.escape(s).replace("\n", "<br>")
-                # ファイル名先頭 YYYYMMDD（週頭）→ 件名・本文頭の月日
-                _mm = _dd = None
-                _dm = _re_cm.match(r"(\d{4})(\d{2})(\d{2})", _target.stem)
-                if _dm:
-                    _mm, _dd = int(_dm.group(2)), int(_dm.group(3))
-                _subject = MAIL_SUBJECT
-                _head    = MAIL_BODY_HEAD
-                if _mm:
-                    try:
-                        _subject = MAIL_SUBJECT.format(m=_mm, d=_dd)
-                        _head    = MAIL_BODY_HEAD.format(m=_mm, d=_dd)
-                    except Exception:
-                        pass
-                # PDF出力時に拾った支給依頼・備考
-                _cache = _CHOHYO_SONO_CACHE.get(str(_target)) or {}
-                _sono = [r for r in (_cache.get("sono") or [])
-                         if (r.get("sel") or "").strip()]
-                _biko = (_cache.get("biko") or "").strip()
-                # 本文ブロックを順に積む（頭 → 支給 → 備考 → 締め）。空行で連結
-                _blocks = [_nl2br(_head)]
-                if _sono:
-                    # Outlook(Word描画)は親divのフォントを表に継承しないので、表・各セルに明示
-                    _font  = "font-family:'游ゴシック','Yu Gothic',sans-serif;font-size:10.5pt;"
-                    _cell  = 'style="%sborder:1px solid #999;padding:3px 10px;"' % _font
-                    _cellc = 'style="%sborder:1px solid #999;padding:3px 10px;text-align:center;"' % _font
-                    _th    = 'style="%sborder:1px solid #999;padding:3px 10px;background:#eee;"' % _font
-                    _rows = ""
-                    for _r in _sono:
-                        _rows += ("<tr><td %s>%s</td><td %s>%s</td><td %s>%s</td></tr>" % (
-                            _cell,  _html.escape(_r.get("sel", "")),
-                            _cellc, _html.escape(_r.get("qty", "")),
-                            _cellc, _html.escape(_r.get("dt", ""))))
-                    _tbl = ("<table style=\"border-collapse:collapse;%s\">"
-                            "<tr><th %s>資材名</th><th %s>数量</th><th %s>支給希望日</th></tr>%s</table>"
-                            % (_font, _th, _th, _th, _rows))
-                    _blocks.append(_nl2br(MAIL_BODY_SUPPLY_INTRO) + "<br>" + _tbl)
-                if _biko:
-                    _blocks.append(_nl2br(_biko))
-                _blocks.append(_nl2br(MAIL_BODY_TAIL))
-                _body_html = "<br><br>".join(_blocks)
-                _ok, _msg = _outlook_compose(_target, MAIL_TO, MAIL_CC, _subject, html_body=_body_html)
-                self.send_response(200 if _ok else 500); self._cors()
-                self.send_header("Content-Type", "application/json"); self.end_headers()
-                self.wfile.write(json.dumps({"ok": _ok, "msg": _msg}, ensure_ascii=False).encode("utf-8"))
-            except Exception as _e:
-                self.send_response(500); self._cors()
-                self.send_header("Content-Type", "application/json"); self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "msg": str(_e)}, ensure_ascii=False).encode("utf-8"))
             return
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -3290,7 +2975,7 @@ def scan_jushi(vfdb: dict, existing_page_keys: set) -> list:
 # ══════════════════════════════════════════════════════════
 # ページ状態管理（クエリパラメータ方式）
 # ══════════════════════════════════════════════════════════
-PAGES = ["日程表", "配送", "依頼書保管", "データベース", "加工記録", "在庫管理", "請求", "帳票保管庫", "オプション"]
+PAGES = ["日程表", "配送", "依頼書保管", "データベース", "加工記録", "在庫管理", "請求", "帳票保管庫"]
 
 # ── ページ状態管理 ──
 if "page_sel" not in st.session_state:
@@ -4085,59 +3770,6 @@ if page_sel == "帳票保管庫":
                 st.download_button("DL", data=_f, file_name=_pdf.name,
                                    mime="application/pdf",
                                    key=f"ar_dl_{_i}", use_container_width=True)
-    st.stop()
-
-# ══════════════════════════════════════════════════════════
-# オプションページ
-# ══════════════════════════════════════════════════════════
-if page_sel == "オプション":
-    import sys as _sys
-    st.markdown("## ⚙️ オプション")
-
-    st.markdown("### サーバー再起動")
-    st.caption(
-        "app.py本体とバックグラウンドHTTPサーバ(8513)をプロセスごと起動し直します。"
-        "コード変更の反映や、8513が固まった時に使います。再起動中の15〜25秒はこのPCのアプリが落ち、"
-        "この画面はリロード待ちになります。各端末は自前で起動した独立プロセスなので、"
-        "このPCの再起動で他端末が影響を受けることはありません。"
-    )
-
-    _confirm = st.checkbox("再起動することを確認しました", key="opt_restart_confirm")
-    if st.button("🔄 サーバーを再起動", type="primary",
-                 disabled=not _confirm, key="opt_restart_btn"):
-        st.warning("再起動します。約15〜25秒待ってこの画面をリロードしてください。"
-                   "もし戻らなければ start_gist.bat を叩き直してください。")
-        _jsonl_log("server_restart", {"by": _pc_name()})
-        # ── Windowsでの確実な再起動 ──
-        # os.execvはStreamlitサーバが上がり切らず失敗するため使わない。
-        # 1) 現プロセスから切り離した別プロセスを起動
-        # 2) そいつが「旧プロセスの終了＝ポート解放」を数秒待ってからstreamlitを起動
-        # 3) 現プロセスは os._exit で即終了しポートを空ける
-        try:
-            _port = int(st.get_option("server.port") or 8501)
-        except Exception:
-            _port = 8501
-        _script = os.path.abspath(__file__)
-        # ping で約3秒スリープ（timeoutはコンソール無しだと失敗するため）→ 旧プロセス終了を待つ
-        _inner = (
-            'ping 127.0.0.1 -n 4 >nul & '
-            f'start "" /min "{_sys.executable}" -m streamlit run "{_script}" '
-            f'--server.port {_port} --server.headless true'
-        )
-        _CREATE_NO_WINDOW = 0x08000000
-        _NEW_PROCESS_GROUP = 0x00000200
-        try:
-            subprocess.Popen(_inner, shell=True, close_fds=True,
-                             creationflags=_CREATE_NO_WINDOW | _NEW_PROCESS_GROUP)
-        except Exception as _e:
-            st.error(f"再起動プロセスの起動に失敗: {_e}")
-            st.stop()
-        try:
-            _sys.stdout.flush(); _sys.stderr.flush()
-        except Exception:
-            pass
-        os._exit(0)
-
     st.stop()
 
 # 準備中ページ
