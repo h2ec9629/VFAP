@@ -1375,8 +1375,8 @@ def detect_base_dir() -> Path:
     _od_work = detect_onedrive_work()
     if _od_work:
         # データフォルダを固定（自動探索のドリフト防止）。
-        # 新名 VFAP-cloud を優先、旧名 SGT_cloud もフォールバックで受ける（改名移行用）。
-        for _cloud_name in ("VFAP-cloud", "SGT_cloud"):
+        # SGT_cloud を優先。VFAP-cloud もフォールバックで受ける。
+        for _cloud_name in ("SGT_cloud", "VFAP-cloud"):
             _cloud = _od_work / _cloud_name
             try:
                 if _cloud.exists():
@@ -1457,6 +1457,71 @@ JUSHI_DIR   = detect_jushi_dir(BASE_DIR)
 STATUS_JSON  = BASE_DIR / "sgt_status.json"
 SEEN_JSON    = BASE_DIR / "iraisho_seen.json"
 DELETED_JSON = BASE_DIR / "iraisho_deleted.json"
+HOLIDAYS_JSON = BASE_DIR / "holidays.json"   # 日程表：ユーザー設定の休日（デイライン除外用）
+_holidays_lock = threading.Lock()
+
+# 2026年祝日（簡易ハードコード。日程ページの gen_working_days と同じ値を共有）
+HOLIDAYS_2026 = {
+    "2026-01-01","2026-01-12","2026-02-11","2026-02-23",
+    "2026-03-20","2026-04-29","2026-05-03","2026-05-04",
+    "2026-05-05","2026-05-06","2026-07-20","2026-08-11",
+    "2026-09-21","2026-09-22","2026-10-12","2026-11-03",
+    "2026-11-23","2026-12-23",
+}
+
+def _load_custom_holidays() -> set:
+    try:
+        if HOLIDAYS_JSON.exists():
+            data = json.loads(HOLIDAYS_JSON.read_text("utf-8"))
+            if isinstance(data, list):
+                return {str(d) for d in data}
+    except Exception:
+        pass
+    return set()
+
+def _save_custom_holidays(dates: list):
+    with _holidays_lock:
+        HOLIDAYS_JSON.write_text(
+            json.dumps(sorted({str(d) for d in dates}), ensure_ascii=False, indent=2),
+            encoding="utf-8")
+
+REMINDERS_JSON = BASE_DIR / "nittei_reminders.json"   # 日程表：リマインダー（デイライン連動）
+_reminders_lock = threading.Lock()
+
+def _load_reminders() -> list:
+    try:
+        if REMINDERS_JSON.exists():
+            data = json.loads(REMINDERS_JSON.read_text("utf-8"))
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
+
+def _save_reminders(items: list):
+    with _reminders_lock:
+        REMINDERS_JSON.write_text(
+            json.dumps(items, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+
+WEEKDAY_HL_JSON = BASE_DIR / "nittei_weekday_hl.json"   # 日程表：曜日ハイライト選択（複数可・永続）
+_weekday_hl_lock = threading.Lock()
+
+def _load_weekday_hl() -> list:
+    try:
+        if WEEKDAY_HL_JSON.exists():
+            data = json.loads(WEEKDAY_HL_JSON.read_text("utf-8"))
+            if isinstance(data, list):
+                return [str(d) for d in data]
+    except Exception:
+        pass
+    return []
+
+def _save_weekday_hl(items: list):
+    with _weekday_hl_lock:
+        WEEKDAY_HL_JSON.write_text(
+            json.dumps([str(d) for d in items], ensure_ascii=False, indent=2),
+            encoding="utf-8")
 JUSHI_CACHE_PATH = BASE_DIR / "jushi_scan_cache.json"   # mtimeキャッシュ
 # クリーン版（外部リンク除去済み）保管先 ─ app.py と同階層の VFAP フォルダ固定
 CLEAN_DIR   = Path(__file__).resolve().parent / "樹脂指示書_クリーン"
@@ -2068,6 +2133,42 @@ class _SaveHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
+        if self.path.startswith("/holidays"):
+            try:
+                data = json.dumps(sorted(_load_custom_holidays()), ensure_ascii=False).encode("utf-8")
+            except Exception:
+                data = b"[]"
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if self.path.startswith("/reminders"):
+            try:
+                data = json.dumps(_load_reminders(), ensure_ascii=False).encode("utf-8")
+            except Exception:
+                data = b"[]"
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if self.path.startswith("/weekday_hl"):
+            # 旧サーバー（このルートを知らない版）が残っている場合はルート扱いで
+            # nittei.json の「配列」が返る。新旧を判別できるよう dict 形式で返す
+            try:
+                data = json.dumps({"ok": True, "days": _load_weekday_hl()},
+                                  ensure_ascii=False).encode("utf-8")
+            except Exception:
+                data = b'{"ok":true,"days":[]}'
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         try:
             _refresh_nittei_from_gist(self.__class__.base_dir)  # Gistを正に更新
         except Exception:
@@ -2081,6 +2182,45 @@ class _SaveHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
     def do_POST(self):
+        if self.path.startswith("/holidays"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length))
+                dates = data if isinstance(data, list) else data.get("dates", [])
+                _save_custom_holidays(dates)
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps({"ok": True}).encode())
+            except Exception as e:
+                self.send_response(500); self._cors(); self.end_headers()
+                self.wfile.write(f'{{"error":"{e}"}}'.encode())
+            return
+        if self.path.startswith("/reminders"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length))
+                items = data if isinstance(data, list) else data.get("items", [])
+                _save_reminders(items)
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps({"ok": True}).encode())
+            except Exception as e:
+                self.send_response(500); self._cors(); self.end_headers()
+                self.wfile.write(f'{{"error":"{e}"}}'.encode())
+            return
+        if self.path.startswith("/weekday_hl"):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length))
+                items = data.get("days", []) if isinstance(data, dict) else data
+                _save_weekday_hl(items)
+                self.send_response(200); self._cors()
+                self.send_header("Content-Type", "application/json"); self.end_headers()
+                self.wfile.write(json.dumps({"ok": True}).encode())
+            except Exception as e:
+                self.send_response(500); self._cors(); self.end_headers()
+                self.wfile.write(f'{{"error":"{e}"}}'.encode())
+            return
         try:
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length))
@@ -2112,7 +2252,10 @@ def _start_save_server(base_dir: Path):
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()
     except OSError:
-        pass  # 既に起動済み
+        # 既に起動済み。ただし「古いプロセスがポートを握ったまま」の場合は
+        # 新しいルート(/weekday_hl等)が効かず不具合の原因になるのでコンソールに警告
+        print(f"[VFAP] port {_SAVE_PORT} は既に使用中。古い app.py が残っている場合は "
+              f"全プロセスを終了してから起動し直してください", flush=True)
 
 _start_save_server(BASE_DIR)
 
@@ -2164,6 +2307,17 @@ class _KakouHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
+        if self.path.split("?")[0] == "/kr_holidays":
+            # 加工記録サマリー用：祝日＋休日設定カレンダーの合算（日程ページのデイライン除外と同じ基準）
+            try:
+                all_holidays = HOLIDAYS_2026 | _load_custom_holidays()
+                data = json.dumps(sorted(all_holidays), ensure_ascii=False).encode("utf-8")
+            except Exception:
+                data = b"[]"
+            self.send_response(200); self._cors()
+            self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(data)
+            return
         if self.path.split("?")[0] == "/chohyo_ping":
             self.send_response(200); self._cors()
             self.send_header("Content-Type", "application/json"); self.end_headers()
@@ -3418,10 +3572,11 @@ if page_sel.startswith("日程表"):
     def gen_working_days(base_date, n_days=40):
         WEEK = ["月","火","水","木","金","土","日"]
         result = []
+        all_holidays = HOLIDAYS_2026 | _load_custom_holidays()  # 祝日＋休日設定カレンダーで選択した日
         d = base_date.replace(hour=0, minute=0, second=0, microsecond=0)
         end = d + timedelta(days=n_days)
         while d < end:
-            if d.weekday() < 5 and d.strftime("%Y-%m-%d") not in HOLIDAYS_2026:
+            if d.weekday() < 5 and d.strftime("%Y-%m-%d") not in all_holidays:
                 result.append([d.strftime("%m/%d"), WEEK[d.weekday()]])
             d += timedelta(days=1)
         return result
@@ -3462,11 +3617,18 @@ if page_sel.startswith("日程表"):
     days_js = _json.dumps(working_days, ensure_ascii=False)
 
     html_src = (Path(__file__).resolve().parent / "日程ページ_試作.html").read_text(encoding="utf-8")
+    # CSS/JSは保守性のため外部ファイルへ分離。配信時にプレースホルダへ差し込んで結合する
+    _nittei_css = (Path(__file__).resolve().parent / "nittei_style.css").read_text(encoding="utf-8")
+    _nittei_js  = (Path(__file__).resolve().parent / "nittei_script.js").read_text(encoding="utf-8")
+    html_src = html_src.replace("/*__NITTEI_CSS__*/", _nittei_css).replace("/*__NITTEI_JS__*/", _nittei_js)
     html_src = _re.sub(r"const days=\[.*?\];",  f"const days={days_js};",  html_src, flags=_re.DOTALL)
     html_src = _re.sub(r"TODAY_DAY=\d+",          f"TODAY_DAY={today_idx}",  html_src)
     html_src = _re.sub(r"let rows=\[.*?\];",     f"let rows={rows_js};",    html_src, flags=_re.DOTALL)
     vfdb_spec_js = _json.dumps(build_vfdb_spec_by_name(), ensure_ascii=False)
     html_src = _re.sub(r"const VFDB_SPEC = \{[^\n]*\};", lambda _m: "const VFDB_SPEC = " + vfdb_spec_js + ";", html_src)
+    natl_holidays_js = _json.dumps(sorted(HOLIDAYS_2026), ensure_ascii=False)
+    html_src = _re.sub(r"const NATIONAL_HOLIDAYS = new Set\(\[[^\]]*\]\);",
+                        lambda _m: "const NATIONAL_HOLIDAYS = new Set(" + natl_holidays_js + ");", html_src)
 
     # ヘッダー：週間・月間の稼働効率（当日除く）をコンパクト表示
     _eff_week_h, _eff_month_h = _calc_kakou_eff_summary()

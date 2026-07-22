@@ -96,7 +96,7 @@
   .kr-work input.kr-keisoku-bad{color:#cc0000 !important;font-weight:700;background:#ffe0e0 !important;border-color:#d23b3b !important;}
   .kr-work td:focus-within{background:#1a2a3a !important;}
   .kr-work td:has(> input){padding:4px 5px !important;}
-  .kr-work td:has(> input) > input{padding:4px 5px !important;min-height:0 !important;height:auto;}
+  .kr-work td:has(> input) > input{padding:4px 5px !important;min-height:0 !important;height:33px;line-height:1.2;}
 
   /* ショーケース（作業者） */
   .kr-showkase{margin-top:auto;border-top:2px solid #2a2a2a;display:flex;align-items:stretch;}
@@ -122,23 +122,26 @@
 
   /* 右パネル */
   .kr-right{flex:0 0 168px;display:flex;flex-direction:column;gap:6px;min-height:0;}
-  .kr-lot{width:100%;border-collapse:collapse;font-size:15px;}
-  .kr-lot th,.kr-lot td{border:1px solid #222;padding:6px 4px;text-align:center;}
+  .kr-lot{width:100%;border-collapse:collapse;font-size:15px;table-layout:fixed;}
+  .kr-lot tr{height:32px;}
+  .kr-lot th,.kr-lot td{border:1px solid #222;padding:6px 4px;text-align:center;vertical-align:middle;}
   .kr-lot th{background:#161616;color:#888;font-weight:600;font-size:14px;}
   .kr-lot td{background:#1c1c1c;}
-  .kr-lot td:has(> input){padding:4px 4px !important;}
-  .kr-lot td:has(> input) > input{min-height:0 !important;padding:3px 5px !important;height:auto !important;}
+  .kr-lot td:has(> input){padding:4px 5px !important;}
+  .kr-lot td:has(> input) > input{min-height:0 !important;padding:4px 5px !important;height:33px !important;line-height:1.2;}
   .kr-lot input{background:#d8d8d8;border:1px solid #b0b0b0;border-radius:5px;color:#1a1a1a;font-size:16px;width:100%;text-align:center;outline:none;padding:2px 5px;}
   .kr-lot input:focus{background:#fff;border-color:#7ba7d9;box-shadow:0 0 0 2px rgba(123,167,217,0.35);}
-  .kr-fry-wrap{flex:6;min-height:0;overflow:auto;}
-  .kr-lot-wrap{flex:4;min-height:0;overflow:auto;}
-  .kr-fry{width:100%;border-collapse:collapse;font-size:14px;}
-  .kr-fry th{background:#161616;color:#888;border:1px solid #222;padding:6px 3px;font-weight:600;font-size:13px;}
-  .kr-fry td{border:1px solid #222;padding:5px 3px;background:#1c1c1c;}
-  .kr-fry td.fl{background:#161616;color:#888;font-size:13px;text-align:right;padding:5px 7px;width:50%;}
-  .kr-fry input{background:#d8d8d8;border:1px solid #b0b0b0;border-radius:5px;color:#1a1a1a;font-size:15px;width:100%;text-align:center;outline:none;padding:3px 4px;}
+  .kr-fry-wrap{flex:0 0 auto;min-height:0;}
+  .kr-lot-wrap{flex:0 0 auto;min-height:0;margin-top:auto;}
+  .kr-fry{width:100%;border-collapse:collapse;font-size:14px;table-layout:fixed;}
+  .kr-fry tr{height:32px;}
+  .kr-fry th{background:#161616;color:#888;border:1px solid #222;padding:7px 4px;font-weight:600;font-size:13px;}
+  .kr-fry td{border:1px solid #222;padding:3px 3px;background:#1c1c1c;vertical-align:middle;}
+  .kr-fry td.fl{background:#161616;color:#888;font-size:13px;text-align:right;padding:3px 7px;width:50%;}
+  .kr-fry input{background:#d8d8d8;border:1px solid #b0b0b0;border-radius:5px;color:#1a1a1a;font-size:16px;width:100%;text-align:center;outline:none;padding:4px 5px;}
   .kr-fry input:focus{background:#fff;border-color:#7ba7d9;box-shadow:0 0 0 2px rgba(123,167,217,0.35);}
-  .kr-fry td:has(> input) > input{padding:2px 5px !important;min-height:0 !important;height:auto;}
+  .kr-fry td:has(> input){padding:4px 5px !important;}
+  .kr-fry td:has(> input) > input{padding:4px 5px !important;min-height:0 !important;height:33px;line-height:1.2;}
   .kr-fry tr.tot td{background:#200a0a;}
   .kr-fry tr.tot input{color:var(--due);font-weight:700;}
   .kr-fry td+td{width:50%;}
@@ -208,7 +211,7 @@
   .waiting{display:flex;align-items:center;justify-content:center;height:100%;font-size:14px;color:#555;}
 
   /* ══════════════════════════════════════════════
-     ゾーンレイアウト（①作業前確認・②加工後記入・③納品後確認）
+     ゾーンレイアウト（①作業前確認・②加工後記入・③納品後確認・④特記事項）
      ══════════════════════════════════════════════ */
   .kr-main{flex:1; display:flex; gap:6px; padding:6px; overflow:hidden; min-height:0;}
 
@@ -216,7 +219,7 @@
   .kr-zone-h{font-size:15px; font-weight:700; padding:5px 10px; border-radius:4px;}
   .kr-zone-body{flex:1; min-height:0; overflow:auto;}
 
-  /* 左カラム：①（上）＋③（下）の二段積み */
+  /* 左カラム：①（上）＋③＋④（下）の積み */
   .kr-left-stack{flex:0 0 19%; min-width:160px; display:flex; flex-direction:column; gap:6px; min-height:0;}
 
   /* ① 作業前確認 */
@@ -237,6 +240,13 @@
   .kr-z3-strip .kr-fl.kr-fl-wide{grid-column:span 6;}
   /* 3アイテム行（注文数・入庫数・箱数）：各2列分 */
   .kr-z3-strip .kr-fl.kr-z3-sm{grid-column:span 2;}
+
+  /* ④ 特記事項（左カラム残りスペースを埋める） */
+  .kr-z4{flex:1 1 auto; background:#1d1a15; border:1px solid #47402c; min-height:60px; display:flex; flex-direction:column;}
+  .kr-z4 .kr-zone-h{background:#392f1e; color:#dcc79f;}
+  .kr-z4 .kr-zone-body{flex:1; display:flex;}
+  #k2-tokki{flex:1; width:100%; box-sizing:border-box; background:#1c1c1c; border:1px solid #2a2a2a; border-radius:4px; color:#e8e8e8; font-size:14px; padding:6px 8px; resize:none; outline:none; font-family:inherit;}
+  #k2-tokki:focus{background:#1a2030;}
   .kr-fl{min-width:0;}
   .kr-fl-lbl{font-size:13px; color:#888; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .kr-fl-box{
@@ -253,6 +263,10 @@
     height:34px; text-align:center; outline:none; padding:6px 8px; box-sizing:border-box;
   }
   .kr-fl-box.kr-fl-input input:focus,.kr-fl-box.kr-fl-input select:focus{background:#1a2030;}
+  /* 項目名と入力欄を1行にまとめる（製品不良数・基材不良数・端材使用・使用基材数） */
+  .kr-fl-inline{display:flex; align-items:center; gap:6px;}
+  .kr-fl-inline .kr-fl-lbl{margin-bottom:0; flex:0 0 auto;}
+  .kr-fl-inline .kr-fl-box{flex:1; min-width:0;}
 
   /* ② 加工後記入（フル高さ・主役） */
   .kr-z2{flex:1 1 auto; background:#1d1616; border:1px solid #3a2a2a; min-height:0;}
@@ -276,9 +290,9 @@
   .kr-lot-bottom{margin-top:auto;}
 
   /* 端数トグル */
-  .kr-kakou-cell{padding:0 !important;}
-  .kr-kakou-wrap{display:flex;align-items:stretch;height:100%;min-height:42px;}
-  .kr-kakou-wrap input{flex:1;min-width:0;width:auto !important;border-radius:5px 0 0 5px !important;}
+  .kr-kakou-cell{padding:4px 5px !important;}
+  .kr-kakou-wrap{display:flex;align-items:stretch;height:33px;min-height:0;}
+  .kr-kakou-wrap input{flex:1;min-width:0;width:auto !important;border-radius:5px 0 0 5px !important;padding:4px 5px !important;min-height:0 !important;height:33px;line-height:1.2;}
   .kr-hazusu-btn{
     flex-shrink:0;border:none;border-left:1px solid #b0b0b0;
     background:#c8c8c8;color:#666;font-size:10px;cursor:pointer;
@@ -322,7 +336,7 @@
   <div class="kr-scroll" id="k2-record-view">
     <div class="kr-main">
 
-      <!-- 左カラム：①作業前確認（上）＋③納品後確認（下） -->
+      <!-- 左カラム：①作業前確認（上）＋③納品後確認＋④特記事項（下） -->
       <div class="kr-left-stack">
 
         <!-- ① 作業前確認：品目スペック -->
@@ -366,17 +380,25 @@
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">明細No</div><div class="kr-fl-box" id="k2-no">—</div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">入庫日</div><div class="kr-fl-box kr-fl-input"><input id="k2-nyuko-bi" type="text" placeholder="YY/MM/DD"></div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">納品日</div><div class="kr-fl-box" id="k2-nohin-bi">—</div></div>
-              <div class="kr-fl kr-fl-wide"><div class="kr-fl-lbl">品名</div><div class="kr-fl-box kr-fl-strong" id="k2-nm-v">—</div></div>
+              <div class="kr-fl kr-fl-wide kr-fl-inline"><div class="kr-fl-lbl">品名</div><div class="kr-fl-box kr-fl-strong" id="k2-nm-v" style="font-size:14px;">—</div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">注文数</div><div class="kr-fl-box" id="k2-qty">—</div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">入庫数</div><div class="kr-fl-box kr-fl-av" id="k2-nyuko-su">0</div></div>
               <div class="kr-fl kr-z3-sm"><div class="kr-fl-lbl">箱数</div><div class="kr-fl-box kr-fl-av" id="k2-hako-total">0 C/S</div></div>
-              <div class="kr-fl"><div class="kr-fl-lbl">製品不良数</div><div class="kr-fl-box kr-fl-av" id="k2-sei-s">0</div></div>
-              <div class="kr-fl"><div class="kr-fl-lbl">基材不良数</div><div class="kr-fl-box kr-fl-input"><input id="k2-kizai-f" type="number" min="0" value="0" oninput="updateKrSummary()"></div></div>
-              <div class="kr-fl"><div class="kr-fl-lbl">端材使用</div><div class="kr-fl-box kr-fl-av" id="k2-hazai-s">0</div></div>
-              <div class="kr-fl"><div class="kr-fl-lbl">使用基材数</div><div class="kr-fl-box kr-fl-av" id="k2-kizai-s">—</div></div>
+              <div class="kr-fl kr-fl-inline"><div class="kr-fl-lbl">製品不良数</div><div class="kr-fl-box kr-fl-av" id="k2-sei-s">0</div></div>
+              <div class="kr-fl kr-fl-inline"><div class="kr-fl-lbl">基材不良数</div><div class="kr-fl-box kr-fl-input"><input id="k2-kizai-f" type="number" min="0" value="0" oninput="updateKrSummary()"></div></div>
+              <div class="kr-fl kr-fl-inline"><div class="kr-fl-lbl">端材使用</div><div class="kr-fl-box kr-fl-av" id="k2-hazai-s">0</div></div>
+              <div class="kr-fl kr-fl-inline"><div class="kr-fl-lbl">使用基材数</div><div class="kr-fl-box kr-fl-av" id="k2-kizai-s">—</div></div>
               <div class="kr-fl"><div class="kr-fl-lbl">梱包箱</div><div class="kr-fl-box kr-fl-input"><select id="k2-konpo-hako"><option value="">—</option></select></div></div>
               <div class="kr-fl"><div class="kr-fl-lbl">使用数<span id="k2-konpo-hasu" style="color:#d97757;font-size:11px;margin-left:6px;font-weight:600;"></span><span id="k2-konpo-warn" style="color:#d9b923;font-size:11px;margin-left:6px;font-weight:600;"></span></div><div class="kr-fl-box" id="k2-konpo-su">—</div></div>
             </div>
+          </div>
+        </div>
+
+        <!-- ④ 特記事項 -->
+        <div class="kr-zone kr-z4">
+          <h2 class="kr-zone-h">④ 特記事項</h2>
+          <div class="kr-zone-body">
+            <textarea id="k2-tokki" placeholder="特記事項を入力"></textarea>
           </div>
         </div>
 
@@ -731,6 +753,7 @@ function _fillKrForm(d) {
   set('k2-kizai-f',  d?.kizai_furyou != null ? d.kizai_furyou : '');
   set('k2-kakoubi',  d?.kakoubi);
   set('k2-lot2',     d?.lot2);
+  set('k2-tokki',    d?.tokki);
   set('k2-hotensuu', d?.hotensuu != null ? d.hotensuu : '');
   // 作業者4人
   const sakushas = d?.sakushas || (d?.sakusha ? [d.sakusha] : []);
@@ -1159,7 +1182,7 @@ function _buildRecord() {
              kake:iv('f2-kake'), meyani:iv('f2-meyani'), beko:iv('f2-beko'),
              osen:iv('f2-osen'), keijo:iv('f2-keijo'), sonota:iv('f2-sonota') },
     sakusha: sakushas[0]||'', sakushas,
-    kakoubi: sv('k2-kakoubi'), lot2: sv('k2-lot2'),
+    kakoubi: sv('k2-kakoubi'), lot2: sv('k2-lot2'), tokki: sv('k2-tokki'),
     hotensuu: iv('k2-hotensuu'), updated_at: (_updatedAt = new Date().toISOString()),
     kanryo: _krCompleted, kanryo_at: _kanryoAt,
   };
@@ -1177,6 +1200,14 @@ async function saveKiroku(silent=false) {
     if(resp.ok){
       if(!silent) toast(_krCompleted ? '加工記録を完了として保存しました ✓' : '加工記録を保存しました（下書き）✓');
       _krDirty = false;
+      // 保存／完了(修正)ボタン押下時（silent=false）のみ、日程ページに通知してリロードさせる。自動保存では通知しない
+      if(!silent) {
+        try {
+          if(window.opener && !window.opener.closed) {
+            window.opener.postMessage({type: 'krSaved', idx: _meta && _meta.idx}, '*');
+          }
+        } catch(_) {}
+      }
     }
     else if(!silent) toast('保存エラー: '+resp.status);
   } catch(e){ if(!silent) toast('保存エラー: '+e.message); }
@@ -1314,12 +1345,13 @@ document.addEventListener('keydown', function(e) {
   else if(e.key === 'ArrowDown') { nr = Math.min(ri+1, KR_LAST_ROW); dir = -1; }
   else if(e.key === 'ArrowUp')   { nr = Math.max(ri-1, 0); dir = -1; }
   else return;
-  // 下書き表示のまま（実際にキー入力せず）移動した場合は、確定せず空欄に戻す
-  // ※以前はここで確定扱いにしていたが、素通りしただけで未入力データが保存される
-  //   バグの原因だったため、実入力（input/compositionendイベント）があった時だけ確定する
+  // Enter/Tab（確定して次へ進む操作）で下書きのまま移動した場合は、
+  // 表示中の下書き値をそのまま確定する。矢印キーでの素通り（ただの閲覧移動）は
+  // 以前どおり未入力扱いに戻す（※以前はここを一律で確定扱いにしていたが、
+  // 素通りしただけで未入力データが保存されるバグの原因だったため分岐した）
   if(el.tagName === 'INPUT' && el.dataset && el.dataset.draft === '1'){
     el.dataset.draft = ''; el.classList.remove('kr-draft');
-    el.value = '';
+    if(e.key !== 'Enter' && e.key !== 'Tab'){ el.value = ''; }
   }
   e.preventDefault();
   function _goCell(nr, nc, dir) {
@@ -1384,13 +1416,36 @@ function toast(msg){
 const KR_WORK_SEGS = [[475,600],[610,740],[785,900],[910,1025]];
 //   07:55=475 / 10:00=600 10:10=610 / 12:20=740 13:05=785 / 15:00=900 15:10=910 / 17:05=1025
 
-// 2時刻(ms)間の「実稼働分」を返す。休憩・時間外・夜間(日跨ぎ)を除外。
+// 休日判定（日程ページのデイラインと同じ基準：土日＋祝日＋休日設定カレンダー）
+let _krHolidaySet = new Set();   // "YYYY-MM-DD" 形式
+let _krHolidaysLoaded = false;
+async function krLoadHolidays(){
+  if(_krHolidaysLoaded) return;
+  try{
+    const resp = await fetch('/kr_holidays', {cache:'no-store'});
+    if(resp.ok) _krHolidaySet = new Set(await resp.json());
+  }catch(_){}
+  _krHolidaysLoaded = true;
+}
+function krYmd(ms){
+  const d = new Date(ms);
+  const z = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+}
+function krIsHoliday(dayMs){
+  const dow = new Date(dayMs).getDay(); // 0=日 6=土
+  if(dow === 0 || dow === 6) return true;
+  return _krHolidaySet.has(krYmd(dayMs));
+}
+
+// 2時刻(ms)間の「実稼働分」を返す。休憩・時間外・夜間(日跨ぎ)・休日を除外。
 function krWorkMinutes(ms1, ms2){
   if(!(ms2 > ms1)) return 0;
   let total = 0;
   // ms1 の当日0時から1日ずつ走査
   const d0 = new Date(ms1); d0.setHours(0,0,0,0);
   for(let day = d0.getTime(); day <= ms2; day += 86400000){
+    if(krIsHoliday(day)) continue;
     for(const [s,e] of KR_WORK_SEGS){
       const segS = day + s*60000;
       const segE = day + e*60000;
@@ -1440,13 +1495,16 @@ function krNavTo(dir) {
 
 // タブ切替
 let _summaryOpen = false;
-function toggleSummary(){
+async function toggleSummary(){
   _summaryOpen = !_summaryOpen;
   document.getElementById('k2-summary-view').style.display = _summaryOpen ? '' : 'none';
   document.getElementById('k2-record-view').style.display  = _summaryOpen ? 'none' : '';
   document.getElementById('k2-sum-tab').classList.toggle('on', _summaryOpen);
   document.getElementById('k2-sum-tab').textContent = _summaryOpen ? '記録に戻る' : 'サマリー';
-  if(_summaryOpen) buildSummary();
+  if(_summaryOpen){
+    await krLoadHolidays();
+    buildSummary();
+  }
 }
 
 // サマリー本体を組み立て
@@ -1530,7 +1588,7 @@ function buildSummary(){
   html += '</tbody></table>';
 
   html += '<div class="kr-sum-note">'
-    + '※ 差数・本/分は会社の稼働時間 07:55〜17:05 のうち、休憩3本（10:00-10:10・12:20-13:05・15:00-15:10）を除く実稼働時間で算出しています。</div>';
+    + '※ 差数・本/分は会社の稼働時間 07:55〜17:05 のうち、休憩3本（10:00-10:10・12:20-13:05・15:00-15:10）と休日（土日・祝日・休日設定カレンダー）を除く実稼働時間で算出しています。</div>';
   body.innerHTML = html;
 }
 </script>

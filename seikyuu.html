@@ -143,10 +143,6 @@
   .btn-pdf{background:#e86a00!important;color:#fff!important;border:1px solid #e86a00!important;
            font-weight:700;padding:5px 14px;border-radius:5px;cursor:pointer;font-size:13px;}
   .btn-pdf:hover{background:#c55a00!important;}
-  /* 複数月選択時はPDF出力を無効化 */
-  .btn-pdf.disabled{background:#555!important;border-color:#555!important;color:#aaa!important;
-                    cursor:not-allowed;opacity:.6;}
-  .btn-pdf.disabled:hover{background:#555!important;}
 
   /* 業態カラー（画面） */
   table.billing td[data-gyotai="LED"]  {background:#1b2a3a;color:#7ba7d9;font-weight:700;text-align:left;}
@@ -396,42 +392,19 @@ function buildBillingData(kakouList) {
 let _byMonth = {};
 let _selectedMonths = new Set();
 
-function toggleMonth(m) {
-  if (_selectedMonths.has(m)) {
-    if (_selectedMonths.size > 1) _selectedMonths.delete(m); // 最低1ヶ月は選択維持
-  } else {
-    _selectedMonths.add(m);
-  }
+function selectMonth(m) {
+  _selectedMonths = new Set([m]); // 常に1ヶ月のみ選択
   renderContent();
 }
 
 function renderTabs() { /* 月グリッドに移行済み — no-op */ }
 
-// PDF出力ボタンの有効/無効を更新（2か月以上選択時は無効）
-function updatePdfBtn() {
-  const btn = document.getElementById('btn-pdf');
-  if (!btn) return;
-  if (_selectedMonths.size > 1) {
-    btn.classList.add('disabled');
-    btn.title = '複数月を表示中はPDF出力できません（1か月だけ選んでください）';
-  } else {
-    btn.classList.remove('disabled');
-    btn.title = '';
-  }
-}
-
-// PDFボタンクリック時：複数月選択中はブロック
 function onPdfClick() {
-  if (_selectedMonths.size > 1) {
-    alert('複数の月を表示中はPDF出力できません。\n1か月だけ選んでから出力してください。');
-    return;
-  }
   window.print();
 }
 
 function renderContent() {
   const el = document.getElementById('page-content');
-  updatePdfBtn();
 
   // 選択月のデータを合算
   const rows = [];
@@ -557,7 +530,7 @@ function renderContent() {
     const hasData = allMonths.includes(m);
     const sel     = _selectedMonths.has(m);
     const cls     = ['month-btn', hasData?'has-data':'', sel?'selected':''].join(' ').trim();
-    const onclick = hasData ? `onclick="toggleMonth(${m})"` : '';
+    const onclick = hasData ? `onclick="selectMonth(${m})"` : '';
     monthGridHtml += `<button class="${cls}" ${onclick}>${MONTHS_LABEL[m]}</button>`;
   }
   // 出動日 = 納品日 ∪ 引取日（同日は1回）
@@ -570,17 +543,12 @@ function renderContent() {
   // ── 月タイトル + HTML組み立て ──────────
   const YEAR = 2026;
   const selArr = [..._selectedMonths].sort((a,b)=>a-b);
-  const monthLabel = selArr.length === 1
-    ? (MONTH_JP[selArr[0]] ? `${YEAR}年 ${MONTH_JP[selArr[0]]}` : `${selArr[0]}月`)
-    : `${YEAR}年 ${selArr.map(m=>MONTH_JP[m]||m+'月').join('・')}`;
-  // PDF用タイトル（単月 or 複数月）
+  const monthLabel = MONTH_JP[selArr[0]] ? `${YEAR}年 ${MONTH_JP[selArr[0]]}` : `${selArr[0]}月`;
+  // PDF用タイトル
   const mm = String(selArr[0]).padStart(2,'0');
-  const mmLast = String(selArr[selArr.length-1]).padStart(2,'0');
-  const lastDay = new Date(YEAR, selArr[selArr.length-1], 0).getDate();
+  const lastDay = new Date(YEAR, selArr[0], 0).getDate();
   const dd = String(lastDay).padStart(2,'0');
-  const pdfTitle2 = selArr.length === 1
-    ? `${YEAR}年${mm}月度（${mm}/01 ～ ${mm}/${dd}）　切断加工数量明細`
-    : `${YEAR}年${mm}月度〜${mmLast}月度（${mm}/01 ～ ${mmLast}/${dd}）　切断加工数量明細`;
+  const pdfTitle2 = `${YEAR}年${mm}月度（${mm}/01 ～ ${mm}/${dd}）　切断加工数量明細`;
 
   el.innerHTML = `
     <div class="pdf-header">
